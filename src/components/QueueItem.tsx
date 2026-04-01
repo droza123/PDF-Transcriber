@@ -4,12 +4,16 @@ import {
   CheckCircle2,
   AlertTriangle,
   X,
+  XCircle,
   RefreshCw,
   Eye,
   Download,
   FolderOpen,
   ScanSearch,
+  GripVertical,
 } from 'lucide-react';
+import { useSortable } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import type { ConversionJob } from '../types';
 import { downloadMarkdown, showInFolder } from '../lib/download';
 
@@ -20,6 +24,19 @@ interface QueueItemProps {
   onRemove: (id: string) => void;
   onRetry: (id: string) => void;
   onPreview: (id: string) => void;
+  onCancel: (id: string) => void;
+}
+
+function formatPrevDate(ts: number): string {
+  const d = new Date(ts);
+  const now = new Date();
+  const diff = now.getTime() - d.getTime();
+  const days = Math.floor(diff / 86400000);
+
+  if (days === 0) return 'Today';
+  if (days === 1) return 'Yesterday';
+  if (days < 7) return `${days} days ago`;
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: d.getFullYear() !== now.getFullYear() ? 'numeric' : undefined });
 }
 
 export default function QueueItem({
@@ -29,7 +46,21 @@ export default function QueueItem({
   onRemove,
   onRetry,
   onPreview,
+  onCancel,
 }: QueueItemProps) {
+  const isDraggable = job.status === 'queued';
+  const { attributes, listeners, setNodeRef, transform, transition } = useSortable({
+    id: job.id,
+    disabled: !isDraggable,
+  });
+  const isDragging = !!transform;
+  const sortableStyle: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    zIndex: isDragging ? 10 : undefined,
+    opacity: isDragging ? 0.9 : undefined,
+  };
+
   const statusIcon = {
     queued: <Clock className="w-4 h-4 text-p-text-dim" />,
     converting:
@@ -51,12 +82,19 @@ export default function QueueItem({
 
   return (
     <div
+      ref={setNodeRef}
+      style={sortableStyle}
       className={`
-        flex items-center gap-3 px-3 py-2.5 rounded-lg tab-transition
+        flex items-center gap-3 px-3 py-2.5 mb-1 rounded-lg
         ${isPreview ? 'bg-p-accent/10 border border-p-accent/30' : 'hover:bg-p-surface-hover'}
         ${isActive ? 'bg-p-surface' : ''}
       `}
     >
+      {isDraggable && (
+        <button {...attributes} {...listeners} className="cursor-grab text-p-text-dim hover:text-p-text-muted -ml-1 shrink-0">
+          <GripVertical className="w-3.5 h-3.5" />
+        </button>
+      )}
       {statusIcon}
 
       <div className="flex-1 min-w-0">
@@ -80,6 +118,13 @@ export default function QueueItem({
         {/* Error message */}
         {job.status === 'error' && job.error && (
           <p className="text-xs text-p-error mt-1 truncate">{job.error}</p>
+        )}
+
+        {/* Previous conversion warning */}
+        {job.previousConversion && (
+          <p className="text-p-warning text-xs mt-0.5">
+            Previously converted {formatPrevDate(job.previousConversion.date)}
+          </p>
         )}
       </div>
 
@@ -112,6 +157,15 @@ export default function QueueItem({
               </button>
             )}
           </>
+        )}
+        {job.status === 'converting' && (
+          <button
+            onClick={() => onCancel(job.id)}
+            className="p-1.5 rounded text-p-text-dim hover:text-p-error tab-transition"
+            title="Cancel"
+          >
+            <XCircle className="w-3.5 h-3.5" />
+          </button>
         )}
         {job.status === 'error' && (
           <button

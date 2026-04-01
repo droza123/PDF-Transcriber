@@ -15,11 +15,48 @@ export interface ConversionJob {
   error: string | null;
   startedAt: number | null;
   completedAt: number | null;
+  resumeFrom?: number; // batch number to resume from (set during rehydration)
+  previousConversion?: { date: number }; // set if this file was already converted before
+}
+
+/** Serializable subset of ConversionJob for queue persistence. */
+export interface SerializedQueueEntry {
+  id: string;
+  fileName: string;
+  sourcePath: string;
+  status: 'queued' | 'interrupted';
+  totalPages: number;
+  totalBatches: number;
+  completedBatches: number;
+  addedAt: number;
+}
+
+/** A completed conversion stored in history. */
+export interface HistoryEntry {
+  id: string;
+  fileName: string;
+  sourcePath: string;
+  savedPath: string;
+  totalPages: number;
+  convertedAt: number;
+  durationMs: number;
+}
+
+/** Intermediate progress saved after each batch. */
+export interface PartialProgress {
+  jobId: string;
+  fileName: string;
+  sourcePath: string;
+  outline: string;
+  totalPages: number;
+  totalBatches: number;
+  completedBatches: number;
+  results: string[];
 }
 
 export function createJob(file: File): ConversionJob {
-  // Electron's File objects have a `path` property with the full filesystem path
-  const sourcePath = (file as any).path || null;
+  // Use Electron's webUtils.getPathForFile (exposed via preload) to get the full path
+  const sourcePath = window.electronAPI?.getFilePath(file) || null;
   return {
     id: crypto.randomUUID(),
     file,

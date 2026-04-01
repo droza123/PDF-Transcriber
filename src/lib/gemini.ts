@@ -1,11 +1,15 @@
 import { GoogleGenAI } from '@google/genai';
 import { getApiKey } from './apiKey';
+import { getSettings, DEFAULT_MODELS } from './settings';
 
-export const BATCH_SIZE = 10;
 const MAX_RETRIES = 3;
 const BATCH_DELAY_MS = 2000;
 const MAX_OUTPUT_TOKENS = 65536;
-const PDF_MODELS = ['gemini-3-flash-preview', 'gemini-2.5-flash'] as const;
+
+/** Dynamic batch size from settings. */
+export function getBatchSize(): number {
+  return getSettings().batchSize;
+}
 
 const PRESCAN_PROMPT = `Analyze this PDF document and produce a structural outline in Markdown. Include:
 
@@ -20,6 +24,9 @@ const PRESCAN_PROMPT = `Analyze this PDF document and produce a structural outli
 Output ONLY the outline — no content, no commentary.`;
 
 function buildBatchPrompt(batchNum: number, totalBatches: number, outline: string): string {
+  const settings = getSettings();
+  const extra = settings.outputNotes ? `\n\nAdditional instructions:\n${settings.outputNotes}` : '';
+
   return `Convert this PDF to Markdown optimized for AI-assisted academic citation.
 This is batch ${batchNum} of ${totalBatches} from the source document.
 
@@ -46,7 +53,7 @@ Content rules:
 8. Preserve block quotes using > syntax.
 9. Preserve numbered and bulleted lists exactly.
 10. Do not add commentary — output only document content as Markdown.
-11. Never duplicate content — each passage of text should appear exactly once.`;
+11. Never duplicate content — each passage of text should appear exactly once.${extra}`;
 }
 
 function getGeminiClient(): GoogleGenAI {
@@ -57,20 +64,40 @@ function getGeminiClient(): GoogleGenAI {
   return new GoogleGenAI({ apiKey: key });
 }
 
+/** Get the model to use, preferring settings, falling back to defaults. */
+function getModel(attempt: number): string {
+  const settings = getSettings();
+  if (attempt === 1) return settings.model;
+  // On retries, cycle through default models
+  return DEFAULT_MODELS[(attempt - 1) % DEFAULT_MODELS.length];
+}
+
+/** Check if an error is a rate limit (429). */
+function isRateLimitError(error: any): boolean {
+  return (
+    error?.status === 429 ||
+    error?.code === 'RESOURCE_EXHAUSTED' ||
+    /429|rate.?limit|resource.?exhausted/i.test(error?.message || '')
+  );
+}
+
 /** Upload a PDF blob to Gemini and get a streamed text response. */
 async function callGemini(
   pdfBlob: Blob,
   prompt: string,
-  onRetry?: (attempt: number, delaySec: number) => void,
+  onRetry?: (attempt: number, delaySec: number, reason?: string) => void,
+  abortSignal?: AbortSignal,
 ): Promise<string> {
   let lastError: Error | null = null;
   const sizeMB = (pdfBlob.size / 1024 / 1024).toFixed(1);
   console.log(`[gemini] Uploading ${sizeMB} MB PDF via File API`);
 
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-    const model = PDF_MODELS[(attempt - 1) % PDF_MODELS.length];
+    const model = getModel(attempt);
 
     try {
+      if (abortSignal?.aborted) throw new DOMException('Cancelled', 'AbortError');
+
       const ai = getGeminiClient();
       console.log(`[gemini] Attempt ${attempt}/${MAX_RETRIES} with ${model}: uploading...`);
 
@@ -79,17 +106,22 @@ async function callGemini(
         config: { mimeType: 'application/pdf' },
       });
 
+      if (abortSignal?.aborted) throw new DOMException('Cancelled', 'AbortError');
+
       console.log(`[gemini] File uploaded (state: ${(uploaded as any).state})`);
 
       if (uploaded.name) {
         let fileState = (uploaded as any).state;
         while (fileState === 'PROCESSING') {
+          if (abortSignal?.aborted) throw new DOMException('Cancelled', 'AbortError');
           console.log(`[gemini] File still processing, waiting 2s...`);
           await new Promise(resolve => setTimeout(resolve, 2000));
           const fileInfo = await ai.files.get({ name: uploaded.name });
           fileState = (fileInfo as any).state;
         }
       }
+
+      if (abortSignal?.aborted) throw new DOMException('Cancelled', 'AbortError');
 
       console.log(`[gemini] Streaming content with ${model}...`);
 
@@ -111,6 +143,7 @@ async function callGemini(
 
       let text = '';
       for await (const chunk of stream) {
+        if (abortSignal?.aborted) throw new DOMException('Cancelled', 'AbortError');
         const part = chunk.text || '';
         text += part;
       }
@@ -123,11 +156,15 @@ async function callGemini(
 
       return text;
     } catch (error: any) {
+      // Don't retry if cancelled
+      if (error.name === 'AbortError') throw error;
+
       lastError = error;
       console.warn(`[gemini] Attempt ${attempt} failed (${model}):`, error.message);
       if (attempt < MAX_RETRIES) {
-        const delaySec = attempt * 5;
-        onRetry?.(attempt + 1, delaySec);
+        const rateLimited = isRateLimitError(error);
+        const delaySec = rateLimited ? attempt * 30 : attempt * 5;
+        onRetry?.(attempt + 1, delaySec, rateLimited ? 'rate_limited' : undefined);
         await new Promise(resolve => setTimeout(resolve, delaySec * 1000));
       }
     }
@@ -139,9 +176,10 @@ async function callGemini(
 /** Pass 1: Extract document outline (TOC + heading hierarchy + page numbering scheme). */
 export async function extractDocumentOutline(
   pdfBlob: Blob,
-  onRetry?: (attempt: number, delaySec: number) => void,
+  onRetry?: (attempt: number, delaySec: number, reason?: string) => void,
+  abortSignal?: AbortSignal,
 ): Promise<string> {
-  return callGemini(pdfBlob, PRESCAN_PROMPT, onRetry);
+  return callGemini(pdfBlob, PRESCAN_PROMPT, onRetry, abortSignal);
 }
 
 /** Pass 2: Convert a batch of pages to Markdown, with outline context. */
@@ -150,10 +188,11 @@ export async function convertPdfBatchToMarkdown(
   batchNum: number,
   totalBatches: number,
   outline: string,
-  onRetry?: (attempt: number, delaySec: number) => void,
+  onRetry?: (attempt: number, delaySec: number, reason?: string) => void,
+  abortSignal?: AbortSignal,
 ): Promise<string> {
   const prompt = buildBatchPrompt(batchNum, totalBatches, outline);
-  return callGemini(pdfBlob, prompt, onRetry);
+  return callGemini(pdfBlob, prompt, onRetry, abortSignal);
 }
 
 /** Pause between batches to respect rate limits. */

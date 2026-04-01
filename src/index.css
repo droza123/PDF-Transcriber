@@ -104,6 +104,65 @@ body {
   --tw-prose-td-borders: var(--p-border-subtle);
 }
 
+/* ─── Frontmatter block (Typora-style grey box) ─────────────────────────── */
+
+.frontmatter-block {
+  background: var(--p-surface);
+  border: 1px solid var(--p-border);
+  border-radius: 6px;
+  padding: 1em 1.25em;
+  font-family: var(--font-mono);
+  font-size: 0.8em;
+  color: var(--p-text-muted);
+  margin-bottom: 1.5em;
+  white-space: pre-wrap;
+  line-height: 1.7;
+}
+
+/* ─── HTML comment markers (golden, like Typora) ─────────────────────────── */
+
+.comment-marker {
+  background: none !important;
+  padding: 0 !important;
+  border: none !important;
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  color: #b8976a;
+}
+
+[data-theme="light"] .comment-marker {
+  color: #9a7b4f;
+}
+
+/* ─── Footnotes (remark-gfm) ──────────────────────────────────────────────── */
+
+.prose-pdf [data-footnote-ref] {
+  color: var(--p-accent);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.prose-pdf [data-footnote-ref]:hover {
+  text-decoration: underline;
+}
+
+.prose-pdf .footnotes {
+  border-top: 1px solid var(--p-border);
+  margin-top: 2em;
+  padding-top: 1em;
+  font-size: 0.85em;
+  color: var(--p-text-muted);
+}
+
+.prose-pdf .footnotes ol {
+  padding-left: 1.5em;
+}
+
+.prose-pdf .data-footnote-backref {
+  color: var(--p-accent);
+  text-decoration: none;
+}
+
 /* ─── Transitions ─────────────────────────────────────────────────────────── */
 
 .tab-transition {
