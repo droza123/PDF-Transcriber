@@ -1,0 +1,111 @@
+@import "tailwindcss";
+@plugin "@tailwindcss/typography";
+
+@theme {
+  --color-p-bg: var(--p-bg);
+  --color-p-bg-deep: var(--p-bg-deep);
+  --color-p-surface: var(--p-surface);
+  --color-p-surface-hover: var(--p-surface-hover);
+  --color-p-border: var(--p-border);
+  --color-p-border-subtle: var(--p-border-subtle);
+  --color-p-text: var(--p-text);
+  --color-p-text-muted: var(--p-text-muted);
+  --color-p-text-dim: var(--p-text-dim);
+  --color-p-accent: var(--p-accent);
+  --color-p-accent-bright: var(--p-accent-bright);
+  --color-p-accent-dim: var(--p-accent-dim);
+  --color-p-success: var(--p-success);
+  --color-p-error: var(--p-error);
+  --color-p-warning: var(--p-warning);
+
+  --font-body: 'Inter', 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Consolas', monospace;
+}
+
+/* ─── Dark Theme (default) ────────────────────────────────────────────────── */
+
+:root {
+  --p-bg: #0f172a;
+  --p-bg-deep: #0b1120;
+  --p-surface: #1e293b;
+  --p-surface-hover: #273548;
+  --p-border: #334155;
+  --p-border-subtle: #1e293b;
+  --p-text: #f1f5f9;
+  --p-text-muted: #94a3b8;
+  --p-text-dim: #64748b;
+  --p-accent: #60a5fa;
+  --p-accent-bright: #93c5fd;
+  --p-accent-dim: #3b82f6;
+  --p-success: #4ade80;
+  --p-error: #f87171;
+  --p-warning: #fbbf24;
+}
+
+/* ─── Light Theme ─────────────────────────────────────────────────────────── */
+
+[data-theme="light"] {
+  --p-bg: #f8fafc;
+  --p-bg-deep: #f1f5f9;
+  --p-surface: #ffffff;
+  --p-surface-hover: #f1f5f9;
+  --p-border: #e2e8f0;
+  --p-border-subtle: #f1f5f9;
+  --p-text: #0f172a;
+  --p-text-muted: #64748b;
+  --p-text-dim: #94a3b8;
+  --p-accent: #2563eb;
+  --p-accent-bright: #3b82f6;
+  --p-accent-dim: #1d4ed8;
+  --p-success: #16a34a;
+  --p-error: #dc2626;
+  --p-warning: #d97706;
+}
+
+/* ─── Base Styles ─────────────────────────────────────────────────────────── */
+
+body {
+  font-family: var(--font-body);
+  background-color: var(--color-p-bg);
+  color: var(--color-p-text);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ─── Scrollbar ───────────────────────────────────────────────────────────── */
+
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-p-border);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-p-text-dim);
+}
+
+/* ─── Prose overrides for preview ─────────────────────────────────────────── */
+
+.prose-pdf {
+  --tw-prose-body: var(--p-text);
+  --tw-prose-headings: var(--p-text);
+  --tw-prose-bold: var(--p-text);
+  --tw-prose-links: var(--p-accent);
+  --tw-prose-counters: var(--p-text-dim);
+  --tw-prose-bullets: var(--p-text-dim);
+  --tw-prose-th-borders: var(--p-border);
+  --tw-prose-td-borders: var(--p-border-subtle);
+}
+
+/* ─── Transitions ─────────────────────────────────────────────────────────── */
+
+.tab-transition {
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
