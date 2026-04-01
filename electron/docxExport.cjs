@@ -158,13 +158,13 @@ async function convertMarkdownToDocx(markdown) {
     if (/^<!--.*-->$/.test(trimmed)) { i++; continue; }
 
     // ── Headings ───────────────────────────────────────────────────────
-    const headingMatch = trimmed.match(/^(#{1,6})\s+(.+)$/);
+    const headingMatch = trimmed.match(/^(#{1,8})\s+(.+)$/);
     if (headingMatch) {
       const level = headingMatch[1].length;
 
       if (inOutline) {
         // Render as indented outline entry, not a real heading
-        const indent = (level - 1) * 360;
+        const indent = (level - 1) * 280;
         children.push(new Paragraph({
           children: [new TextRun({ text: headingMatch[2], size: 20, color: '444444' })],
           indent: { left: indent },
