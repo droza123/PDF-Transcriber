@@ -1,5 +1,6 @@
 import type { ConversionJob, PartialProgress } from '../types';
 import { getPdfPageCount, extractPdfPageRange } from './pdfUtils';
+import { getSettings } from './settings';
 import {
   getBatchSize,
   extractDocumentOutline,
@@ -49,12 +50,14 @@ function buildFrontmatter(fileName: string, totalPages: number): string {
     .replace(/\s+/g, ' ')
     .trim();
   const date = new Date().toISOString().split('T')[0];
+  const model = getSettings().model;
   return `---
 title: "${title}"
 source_file: "${fileName}"
 pages: ${totalPages}
 converted: "${date}"
-converter: "PDFtoMarkdownBatch (Gemini Flash)"
+converter: "PDFtoMarkdownBatch"
+model: "${model}"
 ---`;
 }
 

@@ -104,6 +104,13 @@ body {
   --tw-prose-td-borders: var(--p-border-subtle);
 }
 
+.prose-pdf pre {
+  max-width: 100%;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 /* ─── Frontmatter block (Typora-style grey box) ─────────────────────────── */
 
 .frontmatter-block {
@@ -161,6 +168,12 @@ body {
 .prose-pdf .data-footnote-backref {
   color: var(--p-accent);
   text-decoration: none;
+}
+
+/* ─── Sidebar collapse ────────────────────────────────────────────────────── */
+
+.sidebar-transition {
+  transition: width 0.2s ease;
 }
 
 /* ─── Transitions ─────────────────────────────────────────────────────────── */

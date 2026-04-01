@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
+import { PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import type { ConversionJob, HistoryEntry } from './types';
 import { createJob } from './types';
 import { hasApiKey } from './lib/apiKey';
@@ -26,6 +27,7 @@ export default function App() {
   const [historySearch, setHistorySearch] = useState('');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [paused, setPaused] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const pausedRef = useRef(false);
   const processingRef = useRef(false);
   const historyRef = useRef(history);
@@ -484,70 +486,99 @@ export default function App() {
 
       <div className="flex-1 flex overflow-hidden">
         {/* Left panel: controls + queue/history */}
-        <div className="w-full lg:w-[420px] flex flex-col border-r border-p-border overflow-hidden">
-          <div className="p-4 space-y-4 shrink-0">
-            <ApiKeyInput onKeyChanged={() => setKeyPresent(hasApiKey())} />
-            <FileDropZone onFilesAdded={addFiles} disabled={!keyPresent} />
-          </div>
+        <div className={`flex flex-col border-r border-p-border overflow-hidden sidebar-transition ${
+          sidebarCollapsed ? 'w-12' : 'w-full lg:w-[420px]'
+        }`}>
+          {sidebarCollapsed ? (
+            <div className="flex flex-col items-center pt-4">
+              <button
+                onClick={() => setSidebarCollapsed(false)}
+                className="p-2.5 rounded-lg text-p-text-muted hover:text-p-text hover:bg-p-surface-hover tab-transition"
+                title="Expand sidebar"
+              >
+                <PanelLeftOpen className="w-5 h-5" />
+              </button>
+            </div>
+          ) : (
+            <>
+              {/* Collapse button + API key row */}
+              <div className="flex items-center gap-2 px-4 pt-4 pb-2 shrink-0">
+                <div className="flex-1 min-w-0">
+                  <ApiKeyInput onKeyChanged={() => setKeyPresent(hasApiKey())} />
+                </div>
+                <button
+                  onClick={() => setSidebarCollapsed(true)}
+                  className="p-2.5 rounded-lg text-p-text-muted hover:text-p-text hover:bg-p-surface-hover tab-transition shrink-0"
+                  title="Collapse sidebar"
+                >
+                  <PanelLeftClose className="w-5 h-5" />
+                </button>
+              </div>
 
-          {/* Tab bar */}
-          <div className="flex items-center gap-1 px-4 pb-2 shrink-0">
-            <button
-              onClick={() => setSidebarTab('queue')}
-              className={`px-3 py-1.5 text-xs rounded-md tab-transition ${
-                sidebarTab === 'queue'
-                  ? 'bg-p-accent/15 text-p-accent font-medium'
-                  : 'text-p-text-dim hover:text-p-text hover:bg-p-surface-hover'
-              }`}
-            >
-              Queue{jobs.length > 0 ? ` (${jobs.length})` : ''}
-            </button>
-            <button
-              onClick={() => setSidebarTab('history')}
-              className={`px-3 py-1.5 text-xs rounded-md tab-transition ${
-                sidebarTab === 'history'
-                  ? 'bg-p-accent/15 text-p-accent font-medium'
-                  : 'text-p-text-dim hover:text-p-text hover:bg-p-surface-hover'
-              }`}
-            >
-              History{history.length > 0 ? ` (${history.length})` : ''}
-            </button>
-          </div>
+              <div className="px-4 pb-4 shrink-0">
+                <FileDropZone onFilesAdded={addFiles} disabled={!keyPresent} />
+              </div>
 
-          {/* Tab content */}
-          <div className="flex-1 px-4 pb-4 overflow-auto">
-            {sidebarTab === 'queue' ? (
-              <Queue
-                jobs={jobs}
-                previewJobId={previewSource === 'queue' ? previewJobId : null}
-                paused={paused}
-                onRemove={removeJob}
-                onRetry={retryJob}
-                onPreview={togglePreview}
-                onCancel={cancelJob}
-                onArchiveCompleted={archiveCompleted}
-                onTogglePause={togglePause}
-                onReorder={reorderJobs}
-              />
-            ) : (
-              <History
-                entries={history}
-                searchQuery={historySearch}
-                onSearchChange={setHistorySearch}
-                activeId={previewSource === 'history' ? previewJobId : null}
-                onPreview={previewHistoryItem}
-                onShowInFolder={(entry) => window.electronAPI?.showInFolder(entry.savedPath)}
-                onDelete={deleteHistoryItem}
-                onClearAll={clearHistory}
-                onReconvert={reconvertFromHistory}
-                onExport={handleExportHistory}
-              />
-            )}
-          </div>
+              {/* Tab bar */}
+              <div className="flex items-center gap-1 px-4 pb-2 shrink-0">
+                <button
+                  onClick={() => setSidebarTab('queue')}
+                  className={`px-3 py-1.5 text-xs rounded-md tab-transition ${
+                    sidebarTab === 'queue'
+                      ? 'bg-p-accent/15 text-p-accent font-medium'
+                      : 'text-p-text-dim hover:text-p-text hover:bg-p-surface-hover'
+                  }`}
+                >
+                  Queue{jobs.length > 0 ? ` (${jobs.length})` : ''}
+                </button>
+                <button
+                  onClick={() => setSidebarTab('history')}
+                  className={`px-3 py-1.5 text-xs rounded-md tab-transition ${
+                    sidebarTab === 'history'
+                      ? 'bg-p-accent/15 text-p-accent font-medium'
+                      : 'text-p-text-dim hover:text-p-text hover:bg-p-surface-hover'
+                  }`}
+                >
+                  History{history.length > 0 ? ` (${history.length})` : ''}
+                </button>
+              </div>
+
+              {/* Tab content */}
+              <div className="flex-1 px-4 pb-4 overflow-auto">
+                {sidebarTab === 'queue' ? (
+                  <Queue
+                    jobs={jobs}
+                    previewJobId={previewSource === 'queue' ? previewJobId : null}
+                    paused={paused}
+                    onRemove={removeJob}
+                    onRetry={retryJob}
+                    onPreview={togglePreview}
+                    onCancel={cancelJob}
+                    onArchiveCompleted={archiveCompleted}
+                    onTogglePause={togglePause}
+                    onReorder={reorderJobs}
+                  />
+                ) : (
+                  <History
+                    entries={history}
+                    searchQuery={historySearch}
+                    onSearchChange={setHistorySearch}
+                    activeId={previewSource === 'history' ? previewJobId : null}
+                    onPreview={previewHistoryItem}
+                    onShowInFolder={(entry) => window.electronAPI?.showInFolder(entry.savedPath)}
+                    onDelete={deleteHistoryItem}
+                    onClearAll={clearHistory}
+                    onReconvert={reconvertFromHistory}
+                    onExport={handleExportHistory}
+                  />
+                )}
+              </div>
+            </>
+          )}
         </div>
 
         {/* Right panel: preview */}
-        <div className="hidden lg:flex flex-1 flex-col bg-p-bg-deep">
+        <div className="hidden lg:flex flex-1 flex-col bg-p-bg-deep min-w-0">
           {showQueuePreview ? (
             <Preview job={previewJob} />
           ) : showHistoryPreview ? (

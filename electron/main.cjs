@@ -147,6 +147,15 @@ ipcMain.handle('persistence:file-exists', async (_event, filePath) => {
   }
 });
 
+// IPC: convert markdown to DOCX with native footnotes (runs in main process)
+ipcMain.handle('convert-markdown-to-docx', async (_event, markdown) => {
+  const { convertMarkdownToDocx } = require('./docxExport.cjs');
+  const result = await convertMarkdownToDocx(markdown);
+  // Ensure we return a clean ArrayBuffer (Packer.toBuffer may return Uint8Array or Buffer)
+  const buf = Buffer.from(result);
+  return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+});
+
 // IPC: find in page
 ipcMain.handle('find-in-page', (_event, text, options) => {
   if (!mainWindow) return;

@@ -23,6 +23,7 @@ declare global {
     readMarkdown: (mdPath: string) => Promise<string | null>;
     readPdf: (pdfPath: string) => Promise<ArrayBuffer>;
     fileExists: (filePath: string) => Promise<boolean>;
+    convertMarkdownToDocx: (markdown: string) => Promise<ArrayBuffer>;
     findInPage: (text: string, options?: { findNext?: boolean; forward?: boolean }) => Promise<void>;
     findInPageStop: (action?: string) => Promise<void>;
     onFindInPageResult: (callback: (result: { activeMatchOrdinal: number; matches: number; finalUpdate: boolean }) => void) => () => void;

@@ -3,7 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Copy, Check, Download, FolderOpen, Hash, Table2, BookOpen, Footprints, Search, X, ChevronDown, ChevronUp, Columns2, FileText } from 'lucide-react';
 import type { ConversionJob } from '../types';
-import { downloadMarkdown, showInFolder, exportAsHtml } from '../lib/download';
+import { downloadMarkdown, showInFolder, exportAsHtml, exportAsDocx } from '../lib/download';
 
 interface PreviewProps {
   job?: ConversionJob;
@@ -269,6 +269,12 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
                     className="w-full text-left px-3 py-1.5 text-xs text-p-text hover:bg-p-surface-hover tab-transition"
                   >
                     Export .html
+                  </button>
+                  <button
+                    onClick={() => { exportAsDocx(fileName, md); setExportOpen(false); }}
+                    className="w-full text-left px-3 py-1.5 text-xs text-p-text hover:bg-p-surface-hover tab-transition"
+                  >
+                    Export .docx
                   </button>
                 </div>
               </>
