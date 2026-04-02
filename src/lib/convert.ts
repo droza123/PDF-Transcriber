@@ -1,6 +1,6 @@
 import type { ConversionJob, PartialProgress } from '../types';
 import { getPdfPageCount, extractPdfPageRange } from './pdfUtils';
-import { getSettings } from './settings';
+import { getPrimaryModel } from './settings';
 import {
   getBatchSize,
   extractDocumentOutline,
@@ -50,7 +50,7 @@ function buildFrontmatter(fileName: string, totalPages: number): string {
     .replace(/\s+/g, ' ')
     .trim();
   const date = new Date().toISOString().split('T')[0];
-  const model = getSettings().model;
+  const model = getPrimaryModel();
   return `---
 title: "${title}"
 source_file: "${fileName}"
@@ -65,6 +65,17 @@ model: "${model}"
 export async function convertFile(options: ConvertFileOptions): Promise<string> {
   const { file, jobId, sourcePath, onProgress, onBatchComplete, resumeFrom, abortSignal } = options;
   const BATCH_SIZE = getBatchSize();
+
+  // In-memory set of models to skip — accumulates across batches within this job only.
+  // Never persisted; garbage-collected when the job finishes.
+  const skipModels = new Set<string>();
+
+  const onModelSkip = (skippedModel: string, nextModel: string | null, reason: string) => {
+    const msg = nextModel
+      ? `Skipping ${skippedModel} (${reason}), trying ${nextModel}...`
+      : `Skipping ${skippedModel} (${reason}), no more models to try`;
+    onProgress({ statusMessage: msg });
+  };
 
   onProgress({ status: 'converting', phase: 'scanning', statusMessage: 'Reading PDF...', startedAt: Date.now() });
 
@@ -82,7 +93,7 @@ export async function convertFile(options: ConvertFileOptions): Promise<string> 
   } else {
     onProgress({ statusMessage: 'Scanning document structure...' });
     const fullPdfBlob = new Blob([arrayBuffer], { type: 'application/pdf' });
-    outline = await extractDocumentOutline(
+    const result = await extractDocumentOutline(
       fullPdfBlob,
       (attempt, delay, reason) => {
         const msg = reason === 'rate_limited'
@@ -91,7 +102,10 @@ export async function convertFile(options: ConvertFileOptions): Promise<string> 
         onProgress({ statusMessage: msg });
       },
       abortSignal,
+      skipModels,
+      onModelSkip,
     );
+    outline = result.text;
     console.log(`[convert] Document outline extracted (${outline.length} chars)`);
   }
 
@@ -120,7 +134,7 @@ export async function convertFile(options: ConvertFileOptions): Promise<string> 
       batchBlob = new Blob([batchBytes], { type: 'application/pdf' });
     }
 
-    const markdown = await convertPdfBatchToMarkdown(
+    const result = await convertPdfBatchToMarkdown(
       batchBlob,
       batchNum,
       totalBatches,
@@ -132,9 +146,11 @@ export async function convertFile(options: ConvertFileOptions): Promise<string> 
         onProgress({ statusMessage: msg });
       },
       abortSignal,
+      skipModels,
+      onModelSkip,
     );
 
-    results.push(stripCodeFences(markdown));
+    results.push(stripCodeFences(result.text));
 
     // Persist partial progress after each batch
     onBatchComplete({

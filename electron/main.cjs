@@ -1,6 +1,7 @@
 const { app, BrowserWindow, shell, session, ipcMain } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const { Worker } = require('worker_threads');
 
 let mainWindow;
 
@@ -147,13 +148,24 @@ ipcMain.handle('persistence:file-exists', async (_event, filePath) => {
   }
 });
 
-// IPC: convert markdown to DOCX with native footnotes (runs in main process)
+// IPC: convert markdown to DOCX with native footnotes (runs in worker thread)
 ipcMain.handle('convert-markdown-to-docx', async (_event, markdown) => {
-  const { convertMarkdownToDocx } = require('./docxExport.cjs');
-  const result = await convertMarkdownToDocx(markdown);
-  // Ensure we return a clean ArrayBuffer (Packer.toBuffer may return Uint8Array or Buffer)
-  const buf = Buffer.from(result);
-  return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(path.join(__dirname, 'docxWorker.cjs'), {
+      workerData: { markdown },
+    });
+    worker.on('message', (msg) => {
+      if (msg.error) {
+        reject(new Error(msg.error));
+      } else {
+        resolve(msg.buffer);
+      }
+    });
+    worker.on('error', reject);
+    worker.on('exit', (code) => {
+      if (code !== 0) reject(new Error(`DOCX worker exited with code ${code}`));
+    });
+  });
 });
 
 // IPC: find in page

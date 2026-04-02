@@ -153,17 +153,24 @@ export async function exportAsHtml(fileName: string, markdownContent: string): P
 }
 
 /** Export markdown as a DOCX (Word) file with native footnotes via Electron main process. */
-export async function exportAsDocx(fileName: string, markdownContent: string): Promise<void> {
+export async function exportAsDocx(
+  fileName: string,
+  markdownContent: string,
+  onExporting?: (exporting: boolean) => void,
+): Promise<void> {
   try {
     if (!window.electronAPI?.convertMarkdownToDocx) {
       alert('DOCX export requires the desktop app.');
       return;
     }
+    onExporting?.(true);
     const buffer = await window.electronAPI.convertMarkdownToDocx(markdownContent);
     downloadBlob(new Blob([buffer]), fileName.replace(/\.pdf$/i, '.docx'));
   } catch (e: any) {
     console.error('[docx export] Failed:', e);
     alert(`DOCX export failed: ${e.message || 'Unknown error'}`);
+  } finally {
+    onExporting?.(false);
   }
 }
 

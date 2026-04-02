@@ -2,7 +2,6 @@ import { GoogleGenAI } from '@google/genai';
 import { getApiKey } from './apiKey';
 import { getSettings, DEFAULT_MODELS } from './settings';
 
-const MAX_RETRIES = 3;
 const BATCH_DELAY_MS = 2000;
 const MAX_OUTPUT_TOKENS = 65536;
 
@@ -64,12 +63,11 @@ function getGeminiClient(): GoogleGenAI {
   return new GoogleGenAI({ apiKey: key });
 }
 
-/** Get the model to use, preferring settings, falling back to defaults. */
-function getModel(attempt: number): string {
-  const settings = getSettings();
-  if (attempt === 1) return settings.model;
-  // On retries, cycle through default models
-  return DEFAULT_MODELS[(attempt - 1) % DEFAULT_MODELS.length];
+/** Get the ordered list of models to try from user settings. */
+function getModelPriority(): string[] {
+  const { modelPriority } = getSettings();
+  if (modelPriority.length > 0) return modelPriority;
+  return DEFAULT_MODELS;
 }
 
 /** Check if an error is a rate limit (429). */
@@ -81,25 +79,68 @@ function isRateLimitError(error: any): boolean {
   );
 }
 
+/** Check if an error is persistent (model won't recover). */
+function isPersistentError(error: any): boolean {
+  const status = error?.status;
+  if (status === 401 || status === 403 || status === 404 || status === 400) return true;
+  if (/not.?found|invalid.?model|permission.?denied|unauthorized|bad.?request/i.test(error?.message || '')) return true;
+  return false;
+}
+
+/** Summarize an error for display. */
+function summarizeError(error: any): string {
+  if (isRateLimitError(error)) return 'rate limited';
+  const status = error?.status;
+  if (status === 401 || status === 403) return 'auth error';
+  if (status === 404) return 'model not found';
+  if (status === 400) return 'bad request';
+  if (status >= 500) return `server error (${status})`;
+  return error?.message?.slice(0, 60) || 'unknown error';
+}
+
+export interface GeminiCallOptions {
+  onRetry?: (attempt: number, delaySec: number, reason?: string) => void;
+  onModelSkip?: (skippedModel: string, nextModel: string | null, reason: string) => void;
+  abortSignal?: AbortSignal;
+  skipModels?: Set<string>;
+}
+
+export interface GeminiResult {
+  text: string;
+  modelUsed: string;
+}
+
 /** Upload a PDF blob to Gemini and get a streamed text response. */
 async function callGemini(
   pdfBlob: Blob,
   prompt: string,
-  onRetry?: (attempt: number, delaySec: number, reason?: string) => void,
-  abortSignal?: AbortSignal,
-): Promise<string> {
+  options: GeminiCallOptions = {},
+): Promise<GeminiResult> {
+  const { onRetry, onModelSkip, abortSignal, skipModels } = options;
+
+  const allModels = getModelPriority();
+  const models = allModels.filter(m => !skipModels?.has(m));
+
+  if (models.length === 0) {
+    const skippedList = allModels.map(m => `${m} (previously failed)`).join(', ');
+    throw new Error(`All models failed. Every model in your priority list was skipped due to prior errors: ${skippedList}`);
+  }
+
+  // Minimum 2 attempts even with 1 model, to handle transient errors
+  const maxAttempts = Math.max(models.length, 2);
+  const failureLog: { model: string; reason: string }[] = [];
   let lastError: Error | null = null;
   const sizeMB = (pdfBlob.size / 1024 / 1024).toFixed(1);
   console.log(`[gemini] Uploading ${sizeMB} MB PDF via File API`);
 
-  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-    const model = getModel(attempt);
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const model = models[(attempt - 1) % models.length];
 
     try {
       if (abortSignal?.aborted) throw new DOMException('Cancelled', 'AbortError');
 
       const ai = getGeminiClient();
-      console.log(`[gemini] Attempt ${attempt}/${MAX_RETRIES} with ${model}: uploading...`);
+      console.log(`[gemini] Attempt ${attempt}/${maxAttempts} with ${model}: uploading...`);
 
       const uploaded = await ai.files.upload({
         file: pdfBlob,
@@ -154,23 +195,38 @@ async function callGemini(
         ai.files.delete({ name: uploaded.name }).catch(() => {});
       }
 
-      return text;
+      return { text, modelUsed: model };
     } catch (error: any) {
       // Don't retry if cancelled
       if (error.name === 'AbortError') throw error;
 
       lastError = error;
-      console.warn(`[gemini] Attempt ${attempt} failed (${model}):`, error.message);
-      if (attempt < MAX_RETRIES) {
+      const reason = summarizeError(error);
+      failureLog.push({ model, reason });
+      console.warn(`[gemini] Attempt ${attempt} failed (${model}): ${reason}`);
+
+      // If persistent error, add to skipModels so future batches skip this model
+      if (isPersistentError(error) && skipModels) {
+        skipModels.add(model);
+        const nextModel = models.find(m => m !== model && !skipModels.has(m)) ?? null;
+        onModelSkip?.(model, nextModel, reason);
+        console.log(`[gemini] Model ${model} added to skip list (${reason})`);
+      }
+
+      if (attempt < maxAttempts) {
         const rateLimited = isRateLimitError(error);
         const delaySec = rateLimited ? attempt * 30 : attempt * 5;
+        const nextModel = models[attempt % models.length];
         onRetry?.(attempt + 1, delaySec, rateLimited ? 'rate_limited' : undefined);
+        console.log(`[gemini] Retrying with ${nextModel} in ${delaySec}s...`);
         await new Promise(resolve => setTimeout(resolve, delaySec * 1000));
       }
     }
   }
 
-  throw lastError || new Error('Gemini API call failed after retries');
+  // All attempts exhausted — build a descriptive error message
+  const details = failureLog.map(f => `${f.model} (${f.reason})`).join(', ');
+  throw new Error(`All models failed. Tried: ${details}`);
 }
 
 /** Pass 1: Extract document outline (TOC + heading hierarchy + page numbering scheme). */
@@ -178,8 +234,10 @@ export async function extractDocumentOutline(
   pdfBlob: Blob,
   onRetry?: (attempt: number, delaySec: number, reason?: string) => void,
   abortSignal?: AbortSignal,
-): Promise<string> {
-  return callGemini(pdfBlob, PRESCAN_PROMPT, onRetry, abortSignal);
+  skipModels?: Set<string>,
+  onModelSkip?: (skippedModel: string, nextModel: string | null, reason: string) => void,
+): Promise<GeminiResult> {
+  return callGemini(pdfBlob, PRESCAN_PROMPT, { onRetry, abortSignal, skipModels, onModelSkip });
 }
 
 /** Pass 2: Convert a batch of pages to Markdown, with outline context. */
@@ -190,9 +248,11 @@ export async function convertPdfBatchToMarkdown(
   outline: string,
   onRetry?: (attempt: number, delaySec: number, reason?: string) => void,
   abortSignal?: AbortSignal,
-): Promise<string> {
+  skipModels?: Set<string>,
+  onModelSkip?: (skippedModel: string, nextModel: string | null, reason: string) => void,
+): Promise<GeminiResult> {
   const prompt = buildBatchPrompt(batchNum, totalBatches, outline);
-  return callGemini(pdfBlob, prompt, onRetry, abortSignal);
+  return callGemini(pdfBlob, prompt, { onRetry, abortSignal, skipModels, onModelSkip });
 }
 
 /** Pause between batches to respect rate limits. */

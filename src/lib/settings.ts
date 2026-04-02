@@ -1,5 +1,5 @@
 export interface AppSettings {
-  model: string;
+  modelPriority: string[];
   batchSize: number;
   outputNotes: string;
 }
@@ -7,7 +7,7 @@ export interface AppSettings {
 const STORAGE_KEY = 'app_settings';
 
 const DEFAULTS: AppSettings = {
-  model: 'gemini-2.5-flash',
+  modelPriority: ['gemini-2.5-flash', 'gemini-3-flash-preview'],
   batchSize: 10,
   outputNotes: '',
 };
@@ -16,7 +16,17 @@ export function getSettings(): AppSettings {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return DEFAULTS;
-    return { ...DEFAULTS, ...JSON.parse(raw) };
+    const parsed = JSON.parse(raw);
+
+    // Migration: old format had `model: string` instead of `modelPriority: string[]`
+    if ('model' in parsed && !('modelPriority' in parsed)) {
+      const oldModel: string = parsed.model;
+      parsed.modelPriority = [oldModel, ...DEFAULT_MODELS.filter(m => m !== oldModel)];
+      delete parsed.model;
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
+    }
+
+    return { ...DEFAULTS, ...parsed };
   } catch {
     return DEFAULTS;
   }
@@ -25,6 +35,12 @@ export function getSettings(): AppSettings {
 export function saveSettings(partial: Partial<AppSettings>): void {
   const current = getSettings();
   localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...current, ...partial }));
+}
+
+/** Return the first (highest-priority) model name. */
+export function getPrimaryModel(): string {
+  const { modelPriority } = getSettings();
+  return modelPriority[0] ?? DEFAULT_MODELS[0];
 }
 
 export const DEFAULT_MODELS = ['gemini-3-flash-preview', 'gemini-2.5-flash'];

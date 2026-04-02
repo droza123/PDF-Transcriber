@@ -1,7 +1,7 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo, memo, startTransition } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Copy, Check, Download, FolderOpen, Hash, Table2, BookOpen, Footprints, Search, X, ChevronDown, ChevronUp, Columns2, FileText } from 'lucide-react';
+import { Copy, Check, Download, FolderOpen, Hash, Table2, BookOpen, Footprints, Search, X, ChevronDown, ChevronUp, Columns2, FileText, Loader2 } from 'lucide-react';
 import type { ConversionJob } from '../types';
 import { downloadMarkdown, showInFolder, exportAsHtml, exportAsDocx } from '../lib/download';
 
@@ -13,6 +13,29 @@ interface PreviewProps {
   sourcePath?: string | null;
 }
 
+const INITIAL_CHUNKS = 10;
+const CHUNKS_PER_LOAD = 10;
+
+/** A single chunk of markdown, memoized so it never re-renders unless content changes. */
+const MarkdownChunk = memo(function MarkdownChunk({ content }: { content: string }) {
+  return (
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm]}
+      components={{
+        code({ children, className, ...props }) {
+          const text = String(children).trim();
+          if (!className && /^<!--\s*(page:|Document Outline)/.test(text)) {
+            return <code className="comment-marker" {...props}>{children}</code>;
+          }
+          return <code className={className} {...props}>{children}</code>;
+        },
+      }}
+    >
+      {content}
+    </ReactMarkdown>
+  );
+});
+
 export default function Preview({ job, markdown: externalMd, fileName: externalName, savedPath: externalSavedPath, sourcePath: externalSourcePath }: PreviewProps) {
   const [tab, setTab] = useState<'raw' | 'rendered'>('rendered');
   const [copied, setCopied] = useState(false);
@@ -20,8 +43,8 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
   const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null);
   const [findOpen, setFindOpen] = useState(false);
   const [findText, setFindText] = useState('');
-  const [findResult, setFindResult] = useState<{ active: number; total: number } | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const findInputRef = useRef<HTMLInputElement>(null);
 
   const md = job?.markdown ?? externalMd ?? '';
@@ -30,18 +53,67 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
   const resolvedSourcePath = job?.sourcePath ?? externalSourcePath ?? null;
 
   // Extract YAML frontmatter for styled rendering
-  let frontmatter = '';
-  let body = md;
-  const fmMatch = md.match(/^---\n([\s\S]*?)\n---\n?/);
-  if (fmMatch) {
-    frontmatter = fmMatch[1];
-    body = md.slice(fmMatch[0].length);
-  }
+  const { frontmatter, body } = useMemo(() => {
+    const fmMatch = md.match(/^---\n([\s\S]*?)\n---\n?/);
+    if (fmMatch) {
+      return { frontmatter: fmMatch[1], body: md.slice(fmMatch[0].length) };
+    }
+    return { frontmatter: '', body: md };
+  }, [md]);
 
   // Replace HTML comments with backtick-wrapped code so ReactMarkdown renders them
-  const renderedBody = body
-    .replace(/<!--\s*(page:\s*.+?)\s*-->/g, '`<!-- $1 -->`')
-    .replace(/<!--\s*(Document Outline)\s*-->/g, '`<!-- $1 -->`');
+  const renderedBody = useMemo(() =>
+    body
+      .replace(/<!--\s*(page:\s*.+?)\s*-->/g, '`<!-- $1 -->`')
+      .replace(/<!--\s*(Document Outline)\s*-->/g, '`<!-- $1 -->`'),
+    [body],
+  );
+
+  // Split renderedBody into chunks by page markers for progressive rendering
+  const chunks = useMemo(() => {
+    const split = renderedBody.split(/(?=`<!-- page:)/);
+    if (split.length > 1) return split.filter(Boolean);
+    // Fallback: split by double newlines into ~50KB groups
+    const parts: string[] = [];
+    const paragraphs = renderedBody.split(/\n\n/);
+    let current = '';
+    for (const p of paragraphs) {
+      if (current.length + p.length > 50000 && current.length > 0) {
+        parts.push(current);
+        current = p;
+      } else {
+        current += (current ? '\n\n' : '') + p;
+      }
+    }
+    if (current) parts.push(current);
+    return parts.length > 0 ? parts : [renderedBody];
+  }, [renderedBody]);
+
+  // Progressive chunk loading
+  const [loadedCount, setLoadedCount] = useState(INITIAL_CHUNKS);
+  const sentinelRef = useRef<HTMLDivElement>(null);
+
+  // Reset loaded count when document changes
+  useEffect(() => {
+    setLoadedCount(INITIAL_CHUNKS);
+  }, [md]);
+
+  // IntersectionObserver to load more chunks on scroll
+  useEffect(() => {
+    const sentinel = sentinelRef.current;
+    if (!sentinel || loadedCount >= chunks.length) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) {
+          setLoadedCount(prev => Math.min(prev + CHUNKS_PER_LOAD, chunks.length));
+        }
+      },
+      { rootMargin: '200px' },
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [loadedCount, chunks.length]);
 
   function handleCopy() {
     navigator.clipboard.writeText(md);
@@ -49,7 +121,7 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
     setTimeout(() => setCopied(false), 2000);
   }
 
-  // ── F4: Find in page (custom React-based search) ───────────────────────
+  // ── Find in page ───────────────────────────────────────────────────────────
   const [findActiveIndex, setFindActiveIndex] = useState(0);
   const contentRef = useRef<HTMLDivElement>(null);
 
@@ -68,10 +140,19 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [findOpen]);
 
-  // Count matches in the raw markdown
-  const findMatchCount = findText
-    ? (md.toLowerCase().match(new RegExp(findText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi')) || []).length
-    : 0;
+  // When find opens, force-load all chunks so TreeWalker can find everything
+  useEffect(() => {
+    if (findOpen && findText && loadedCount < chunks.length) {
+      startTransition(() => setLoadedCount(chunks.length));
+    }
+  }, [findOpen, findText, loadedCount, chunks.length]);
+
+  // Count matches in the raw markdown (memoized)
+  const findMatchCount = useMemo(() => {
+    if (!findText) return 0;
+    const escaped = findText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return (md.match(new RegExp(escaped, 'gi')) || []).length;
+  }, [md, findText]);
 
   useEffect(() => {
     setFindActiveIndex(0);
@@ -113,7 +194,6 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
       range.setEnd(textNode, start + findText.length);
       const mark = document.createElement('mark');
       mark.setAttribute('data-find', 'true');
-      // i is reversed; document-order index for this match is i
       const docOrderIndex = i;
       mark.style.background = docOrderIndex === findActiveIndex ? '#f59e0b' : '#fde68a';
       mark.style.color = '#000';
@@ -122,7 +202,6 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
     }
 
     // Scroll active match into view
-    // Marks are in document order (reverse insertion preserves DOM order)
     const activeMarks = el.querySelectorAll('mark[data-find]');
     const activeEl = activeMarks[findActiveIndex];
     activeEl?.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -150,7 +229,7 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
     if (findMatchCount > 0) setFindActiveIndex(i => (i - 1 + findMatchCount) % findMatchCount);
   }
 
-  // ── F14: Side-by-side PDF ─────────────────────────────────────────────────
+  // ── Side-by-side PDF ─────────────────────────────────────────────────────────
   useEffect(() => {
     if (!sideBySide || !resolvedSourcePath) {
       if (pdfBlobUrl) { URL.revokeObjectURL(pdfBlobUrl); setPdfBlobUrl(null); }
@@ -175,11 +254,13 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
     return () => { if (pdfBlobUrl) URL.revokeObjectURL(pdfBlobUrl); };
   }, [pdfBlobUrl]);
 
-  // Quality stats
-  const pageMarkers = (md.match(/<!-- page: .+? -->/g) || []).length;
-  const headings = (md.match(/^#{1,6}\s+\S/gm) || []).length;
-  const tables = (md.match(/^\|.+\|$/gm) || []).length;
-  const footnotes = (md.match(/\[\^\w+\]/g) || []).length;
+  // Quality stats (memoized)
+  const stats = useMemo(() => ({
+    pageMarkers: (md.match(/<!-- page: .+? -->/g) || []).length,
+    headings: (md.match(/^#{1,6}\s+\S/gm) || []).length,
+    tables: (md.match(/^\|.+\|$/gm) || []).length,
+    footnotes: (md.match(/\[\^\w+\]/g) || []).length,
+  }), [md]);
 
   return (
     <div className="flex flex-col h-full">
@@ -271,7 +352,7 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
                     Export .html
                   </button>
                   <button
-                    onClick={() => { exportAsDocx(fileName, md); setExportOpen(false); }}
+                    onClick={() => { exportAsDocx(fileName, md, setExporting); setExportOpen(false); }}
                     className="w-full text-left px-3 py-1.5 text-xs text-p-text hover:bg-p-surface-hover tab-transition"
                   >
                     Export .docx
@@ -319,23 +400,23 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
       {/* Quality stats */}
       <div className="flex items-center gap-4 px-4 py-2 border-b border-p-border-subtle text-xs text-p-text-dim shrink-0">
         <span className="flex items-center gap-1" title="Page markers found">
-          <Hash className="w-3 h-3" /> {pageMarkers} pages
+          <Hash className="w-3 h-3" /> {stats.pageMarkers} pages
         </span>
         <span className="flex items-center gap-1" title="Headings found">
-          <BookOpen className="w-3 h-3" /> {headings} headings
+          <BookOpen className="w-3 h-3" /> {stats.headings} headings
         </span>
         <span className="flex items-center gap-1" title="Table rows found">
-          <Table2 className="w-3 h-3" /> {tables} table rows
+          <Table2 className="w-3 h-3" /> {stats.tables} table rows
         </span>
         <span className="flex items-center gap-1" title="Footnote references found">
-          <Footprints className="w-3 h-3" /> {footnotes} footnotes
+          <Footprints className="w-3 h-3" /> {stats.footnotes} footnotes
         </span>
         <span className="ml-auto">{(md.length / 1024).toFixed(1)} KB</span>
       </div>
 
       {/* Content */}
       <div className={`flex-1 overflow-hidden ${sideBySide ? 'flex' : ''}`}>
-        {/* PDF pane (F14) */}
+        {/* PDF pane */}
         {sideBySide && pdfBlobUrl && (
           <div className="w-1/2 border-r border-p-border">
             <object data={pdfBlobUrl} type="application/pdf" className="w-full h-full">
@@ -355,24 +436,31 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
               {frontmatter && (
                 <pre className="frontmatter-block">{frontmatter}</pre>
               )}
-              <ReactMarkdown
-                remarkPlugins={[remarkGfm]}
-                components={{
-                  code({ children, className, ...props }) {
-                    const text = String(children).trim();
-                    if (!className && /^<!--\s*(page:|Document Outline)/.test(text)) {
-                      return <code className="comment-marker" {...props}>{children}</code>;
-                    }
-                    return <code className={className} {...props}>{children}</code>;
-                  },
-                }}
-              >
-                {renderedBody}
-              </ReactMarkdown>
+              {chunks.slice(0, loadedCount).map((chunk, i) => (
+                <MarkdownChunk key={i} content={chunk} />
+              ))}
+              {loadedCount < chunks.length && (
+                <div ref={sentinelRef} className="flex items-center justify-center py-4 gap-2">
+                  <Loader2 className="w-4 h-4 text-p-accent animate-spin" />
+                  <span className="text-xs text-p-text-dim">
+                    Loading more ({loadedCount} of {chunks.length} sections)...
+                  </span>
+                </div>
+              )}
             </article>
           )}
         </div>
       </div>
+
+      {/* DOCX export overlay */}
+      {exporting && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="rounded-xl bg-p-bg border border-p-border shadow-lg p-6 flex flex-col items-center gap-3">
+            <Loader2 className="w-8 h-8 text-p-accent animate-spin" />
+            <span className="text-sm text-p-text">Exporting to Word...</span>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
