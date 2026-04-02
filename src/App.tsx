@@ -480,7 +480,6 @@ export default function App() {
       <Header
         theme={theme}
         onToggleTheme={toggleTheme}
-        hasKey={keyPresent}
         onOpenSettings={() => setSettingsOpen(true)}
       />
 

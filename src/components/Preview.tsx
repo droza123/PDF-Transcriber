@@ -361,7 +361,7 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
                     onClick={() => { exportAsDocx(fileName, md, setExporting, 'logos'); setExportOpen(false); }}
                     className="w-full text-left px-3 py-1.5 text-xs text-p-text hover:bg-p-surface-hover tab-transition"
                   >
-                    Export .docx (Logos)
+                    Export .docx (Logos/Verbum)
                   </button>
                 </div>
               </>

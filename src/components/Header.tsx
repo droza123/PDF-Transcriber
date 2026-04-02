@@ -1,13 +1,12 @@
-import { Sun, Moon, FileText, Key, Settings2 } from 'lucide-react';
+import { Sun, Moon, FileText, Settings2 } from 'lucide-react';
 
 interface HeaderProps {
   theme: 'dark' | 'light';
   onToggleTheme: () => void;
-  hasKey: boolean;
   onOpenSettings: () => void;
 }
 
-export default function Header({ theme, onToggleTheme, hasKey, onOpenSettings }: HeaderProps) {
+export default function Header({ theme, onToggleTheme, onOpenSettings }: HeaderProps) {
   return (
     <header className="flex items-center justify-between px-6 py-4 border-b border-p-border">
       <div className="flex items-center gap-3">
@@ -18,10 +17,6 @@ export default function Header({ theme, onToggleTheme, hasKey, onOpenSettings }:
         </div>
       </div>
       <div className="flex items-center gap-3">
-        <div className="flex items-center gap-1.5 text-xs text-p-text-muted">
-          <Key className="w-3.5 h-3.5" />
-          <span className={`w-2 h-2 rounded-full ${hasKey ? 'bg-p-success' : 'bg-p-error'}`} />
-        </div>
         <button
           onClick={onOpenSettings}
           className="p-2 rounded-lg text-p-text-muted hover:text-p-text hover:bg-p-surface-hover tab-transition"
