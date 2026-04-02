@@ -56,7 +56,7 @@ title: "${title}"
 source_file: "${fileName}"
 pages: ${totalPages}
 converted: "${date}"
-converter: "PDFtoMarkdownBatch"
+converter: "PDF Transcriber"
 model: "${model}"
 ---`;
 }

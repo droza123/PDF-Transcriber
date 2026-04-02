@@ -12,8 +12,8 @@ export default function Header({ theme, onToggleTheme, onOpenSettings }: HeaderP
       <div className="flex items-center gap-3">
         <FileText className="w-6 h-6 text-p-accent" />
         <div>
-          <h1 className="text-lg font-semibold text-p-text">PDF to Markdown</h1>
-          <p className="text-xs text-p-text-muted">Batch converter for academic citation <span className="text-p-text-dim">v{__APP_VERSION__}</span></p>
+          <h1 className="text-lg font-semibold text-p-text">PDF Transcriber</h1>
+          <p className="text-xs text-p-text-muted">AI-powered batch conversion to Markdown, Word, and HTML <span className="text-p-text-dim">v{__APP_VERSION__}</span></p>
         </div>
       </div>
       <div className="flex items-center gap-3">
