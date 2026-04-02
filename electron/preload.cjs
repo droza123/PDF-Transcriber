@@ -31,6 +31,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // format: 'standard' (default) or 'logos' (Logos/Verbum Personal Books)
   convertMarkdownToDocx: (markdown, format) => ipcRenderer.invoke('convert-markdown-to-docx', markdown, format),
 
+  // Power save blocker (prevents OS suspension during conversion)
+  startPowerBlock: () => ipcRenderer.invoke('power:start-blocking'),
+  stopPowerBlock: () => ipcRenderer.invoke('power:stop-blocking'),
+
   // Find in page
   findInPage: (text, options) => ipcRenderer.invoke('find-in-page', text, options),
   findInPageStop: (action) => ipcRenderer.invoke('find-in-page-stop', action),

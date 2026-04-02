@@ -180,6 +180,9 @@ export default function App() {
     if (processingRef.current) return;
     processingRef.current = true;
 
+    // Prevent OS from suspending the app while processing
+    await window.electronAPI?.startPowerBlock();
+
     while (true) {
       // Check if paused
       if (pausedRef.current) break;
@@ -342,6 +345,8 @@ export default function App() {
       }
     }
 
+    // Allow OS suspension again when queue is idle
+    await window.electronAPI?.stopPowerBlock();
     processingRef.current = false;
   }, [updateJob, addLogEntry]);
 

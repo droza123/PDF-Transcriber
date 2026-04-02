@@ -1,9 +1,10 @@
-const { app, BrowserWindow, shell, session, ipcMain } = require('electron');
+const { app, BrowserWindow, shell, session, ipcMain, powerSaveBlocker } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { Worker } = require('worker_threads');
 
 let mainWindow;
+let powerSaveBlockerId = null;
 
 // ── Persistence paths ────────────────────────────────────────────────────────
 const userDataPath = app.getPath('userData');
@@ -46,6 +47,7 @@ function createWindow() {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
+      backgroundThrottling: false,
       preload: path.join(__dirname, 'preload.cjs'),
     },
     autoHideMenuBar: true,
@@ -215,6 +217,27 @@ ipcMain.handle('find-in-page', (_event, text, options) => {
 ipcMain.handle('find-in-page-stop', (_event, action) => {
   if (!mainWindow) return;
   mainWindow.webContents.stopFindInPage(action || 'clearSelection');
+});
+
+// ── Power save blocker ──────────────────────────────────────────────────────
+// Prevents the OS from sleeping or reducing CPU while conversions are running.
+// The renderer calls these when processing starts/stops.
+
+ipcMain.handle('power:start-blocking', () => {
+  if (powerSaveBlockerId !== null && powerSaveBlocker.isStarted(powerSaveBlockerId)) {
+    return powerSaveBlockerId;
+  }
+  powerSaveBlockerId = powerSaveBlocker.start('prevent-app-suspension');
+  console.log(`[power] Started power save blocker (id: ${powerSaveBlockerId})`);
+  return powerSaveBlockerId;
+});
+
+ipcMain.handle('power:stop-blocking', () => {
+  if (powerSaveBlockerId !== null && powerSaveBlocker.isStarted(powerSaveBlockerId)) {
+    powerSaveBlocker.stop(powerSaveBlockerId);
+    console.log(`[power] Stopped power save blocker (id: ${powerSaveBlockerId})`);
+    powerSaveBlockerId = null;
+  }
 });
 
 // ── App lifecycle ────────────────────────────────────────────────────────────
