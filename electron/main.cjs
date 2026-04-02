@@ -10,8 +10,10 @@ const userDataPath = app.getPath('userData');
 const historyPath = path.join(userDataPath, 'history.json');
 const queuePath = path.join(userDataPath, 'queue.json');
 const progressDir = path.join(userDataPath, 'progress');
+const markdownDir = path.join(userDataPath, 'markdown');
 
 fs.mkdirSync(progressDir, { recursive: true });
+fs.mkdirSync(markdownDir, { recursive: true });
 
 /** Write JSON atomically via temp-file-then-rename. */
 async function atomicWriteJson(filePath, data) {
@@ -91,6 +93,30 @@ ipcMain.handle('save-markdown', async (_event, sourcePdfPath, content) => {
 
 ipcMain.handle('show-in-folder', async (_event, filePath) => {
   shell.showItemInFolder(filePath);
+});
+
+ipcMain.handle('save-file', async (_event, sourcePdfPath, data, extension) => {
+  const dir = path.dirname(sourcePdfPath);
+  const baseName = path.basename(sourcePdfPath, path.extname(sourcePdfPath));
+  const filePath = path.join(dir, baseName + '.' + extension);
+  const content = typeof data === 'string' ? data : Buffer.from(data);
+  await fs.promises.writeFile(filePath, content);
+  return filePath;
+});
+
+ipcMain.handle('save-internal-markdown', async (_event, jobId, content) => {
+  const filePath = path.join(markdownDir, jobId + '.md');
+  await fs.promises.writeFile(filePath, content, 'utf-8');
+  return filePath;
+});
+
+ipcMain.handle('load-internal-markdown', async (_event, jobId) => {
+  const filePath = path.join(markdownDir, jobId + '.md');
+  try {
+    return await fs.promises.readFile(filePath, 'utf-8');
+  } catch {
+    return null;
+  }
 });
 
 // ── IPC: persistence ─────────────────────────────────────────────────────────

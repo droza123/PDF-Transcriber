@@ -4,7 +4,7 @@ import type { ConversionJob, HistoryEntry } from './types';
 import { createJob } from './types';
 import { hasApiKey } from './lib/apiKey';
 import { convertFile } from './lib/convert';
-import { saveMarkdownToSource, canSaveToSource, exportHistoryAsCsv } from './lib/download';
+import { canSaveToSource, runAutoExport, exportHistoryAsCsv } from './lib/download';
 import Header from './components/Header';
 import ApiKeyInput from './components/ApiKeyInput';
 import FileDropZone from './components/FileDropZone';
@@ -216,12 +216,16 @@ export default function App() {
         // Clean up progress file
         await window.electronAPI?.deleteProgress(jobId);
 
-        // Auto-save to source folder
+        // Auto-export to selected formats
         let savedPath: string | null = null;
         let saveError = '';
         if (nextJob.sourcePath && canSaveToSource()) {
           try {
-            savedPath = await saveMarkdownToSource(nextJob.sourcePath, markdown);
+            const result = await runAutoExport(nextJob.sourcePath, nextJob.fileName, markdown, jobId);
+            savedPath = result.savedPath;
+            if (result.errors.length > 0) {
+              saveError = result.errors.join('; ');
+            }
           } catch (e: any) {
             saveError = e.message || 'save failed';
           }
@@ -391,8 +395,13 @@ export default function App() {
   const previewHistoryItem = useCallback(async (entry: HistoryEntry) => {
     setPreviewSource('history');
     setPreviewJobId(entry.id);
-    const content = await window.electronAPI?.readMarkdown(entry.savedPath);
-    setHistoryMarkdown(content ?? `_File not found: ${entry.savedPath}_`);
+    let content = entry.savedPath
+      ? await window.electronAPI?.readMarkdown(entry.savedPath)
+      : null;
+    if (!content) {
+      content = await window.electronAPI?.loadInternalMarkdown(entry.id) ?? null;
+    }
+    setHistoryMarkdown(content ?? `_Markdown not found for this conversion_`);
   }, []);
 
   const deleteHistoryItem = useCallback((id: string) => {

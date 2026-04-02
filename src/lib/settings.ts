@@ -1,7 +1,10 @@
+export type ExportFormat = 'md' | 'html' | 'docx' | 'docx-logos';
+
 export interface AppSettings {
   modelPriority: string[];
   batchSize: number;
   outputNotes: string;
+  autoExportFormats: ExportFormat[];
 }
 
 const STORAGE_KEY = 'app_settings';
@@ -10,6 +13,7 @@ const DEFAULTS: AppSettings = {
   modelPriority: ['gemini-2.5-flash', 'gemini-3-flash-preview'],
   batchSize: 10,
   outputNotes: '',
+  autoExportFormats: ['md'],
 };
 
 export function getSettings(): AppSettings {

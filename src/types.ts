@@ -11,6 +11,7 @@ export interface ConversionJob {
   totalBatches: number;
   totalPages: number;
   statusMessage: string;
+  activeModel?: string;
   markdown: string | null;
   error: string | null;
   startedAt: number | null;

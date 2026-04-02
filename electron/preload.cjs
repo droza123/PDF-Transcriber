@@ -6,6 +6,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('save-markdown', sourcePdfPath, content),
   showInFolder: (filePath) =>
     ipcRenderer.invoke('show-in-folder', filePath),
+  saveFile: (sourcePdfPath, data, extension) =>
+    ipcRenderer.invoke('save-file', sourcePdfPath, data, extension),
+  saveInternalMarkdown: (jobId, content) =>
+    ipcRenderer.invoke('save-internal-markdown', jobId, content),
+  loadInternalMarkdown: (jobId) =>
+    ipcRenderer.invoke('load-internal-markdown', jobId),
 
   // Persistence
   saveQueue: (entries) => ipcRenderer.invoke('persistence:save-queue', entries),

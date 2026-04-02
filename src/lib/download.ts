@@ -1,5 +1,6 @@
 import JSZip from 'jszip';
 import type { ConversionJob, HistoryEntry } from '../types';
+import { getSettings } from './settings';
 
 // ── Shared HTML rendering (lazy-loaded to avoid crashing on import) ──────────
 
@@ -173,6 +174,64 @@ export async function exportAsDocx(
   } finally {
     onExporting?.(false);
   }
+}
+
+/** Auto-export to all formats selected in settings. Always stores markdown internally. */
+export async function runAutoExport(
+  sourcePath: string,
+  fileName: string,
+  markdown: string,
+  jobId: string,
+): Promise<{ savedPath: string | null; errors: string[] }> {
+  const api = window.electronAPI;
+  if (!api) return { savedPath: null, errors: [] };
+
+  const { autoExportFormats } = getSettings();
+  const errors: string[] = [];
+  let savedPath: string | null = null;
+
+  // Always store markdown internally for re-export / preview
+  try {
+    await api.saveInternalMarkdown(jobId, markdown);
+  } catch (e: any) {
+    errors.push(`internal save: ${e.message}`);
+  }
+
+  for (const fmt of autoExportFormats) {
+    try {
+      switch (fmt) {
+        case 'md': {
+          savedPath = await api.saveMarkdown(sourcePath, markdown);
+          break;
+        }
+        case 'html': {
+          const title = fileName.replace(/\.pdf$/i, '');
+          const html = await renderMarkdownToHtml(markdown, title);
+          await api.saveFile(sourcePath, html, 'html');
+          break;
+        }
+        case 'docx': {
+          const buffer = await api.convertMarkdownToDocx(markdown, 'standard');
+          await api.saveFile(sourcePath, buffer, 'docx');
+          break;
+        }
+        case 'docx-logos': {
+          const buffer = await api.convertMarkdownToDocx(markdown, 'logos');
+          // Use a distinct filename to avoid overwriting standard .docx
+          const dir = sourcePath.replace(/[/\\][^/\\]+$/, '');
+          const base = fileName.replace(/\.pdf$/i, '');
+          // Save via saveFile which derives path from sourcePath, but logos uses same .docx ext
+          // So we save it with a suffix by writing directly
+          await api.saveFile(sourcePath, buffer, 'logos.docx');
+          break;
+        }
+      }
+    } catch (e: any) {
+      errors.push(`${fmt}: ${e.message}`);
+    }
+  }
+
+  return { savedPath, errors };
 }
 
 /** Download all completed jobs as a ZIP file. */

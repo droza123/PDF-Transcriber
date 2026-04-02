@@ -106,6 +106,7 @@ export async function convertFile(options: ConvertFileOptions): Promise<string> 
       onModelSkip,
     );
     outline = result.text;
+    onProgress({ activeModel: result.modelUsed });
     console.log(`[convert] Document outline extracted (${outline.length} chars)`);
   }
 
@@ -150,6 +151,7 @@ export async function convertFile(options: ConvertFileOptions): Promise<string> 
       onModelSkip,
     );
 
+    onProgress({ activeModel: result.modelUsed });
     results.push(stripCodeFences(result.text));
 
     // Persist partial progress after each batch

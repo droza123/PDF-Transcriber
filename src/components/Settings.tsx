@@ -3,7 +3,7 @@ import { X, Save, GripVertical, RefreshCw } from 'lucide-react';
 import { DndContext, closestCenter, type DragEndEvent } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { getSettings, saveSettings, DEFAULT_MODELS } from '../lib/settings';
+import { getSettings, saveSettings, DEFAULT_MODELS, type ExportFormat } from '../lib/settings';
 import { getCachedModels, getApiKey, fetchAvailableModels } from '../lib/apiKey';
 
 interface SettingsProps {
@@ -63,6 +63,7 @@ export default function Settings({ open, onClose }: SettingsProps) {
   const [modelPriority, setModelPriority] = useState<string[]>([]);
   const [batchSize, setBatchSize] = useState(10);
   const [outputNotes, setOutputNotes] = useState('');
+  const [autoExportFormats, setAutoExportFormats] = useState<ExportFormat[]>(['md']);
   const [refreshing, setRefreshing] = useState(false);
   const [cachedModels, setCachedModels] = useState<string[]>([]);
 
@@ -72,6 +73,7 @@ export default function Settings({ open, onClose }: SettingsProps) {
       setModelPriority(s.modelPriority);
       setBatchSize(s.batchSize);
       setOutputNotes(s.outputNotes);
+      setAutoExportFormats(s.autoExportFormats);
       setCachedModels(getCachedModels());
     }
   }, [open]);
@@ -125,7 +127,7 @@ export default function Settings({ open, onClose }: SettingsProps) {
   }
 
   const handleSave = () => {
-    saveSettings({ modelPriority, batchSize, outputNotes });
+    saveSettings({ modelPriority, batchSize, outputNotes, autoExportFormats });
     onClose();
   };
 
@@ -228,6 +230,44 @@ export default function Settings({ open, onClose }: SettingsProps) {
                 </option>
               ))}
             </select>
+          </div>
+
+          {/* Auto-export formats */}
+          <div>
+            <label className="block text-sm font-medium text-p-text mb-1">Auto-export formats</label>
+            <p className="text-xs text-p-text-dim mb-2">
+              Choose which file formats are saved automatically after conversion. Markdown is always stored internally for re-export.
+            </p>
+            <div className="space-y-1.5">
+              {([
+                ['md', 'Markdown (.md)'],
+                ['html', 'HTML (.html)'],
+                ['docx', 'Word (.docx)'],
+                ['docx-logos', 'Word \u2014 Logos/Verbum (.docx)'],
+              ] as const).map(([fmt, label]) => {
+                const checked = autoExportFormats.includes(fmt);
+                const isLast = checked && autoExportFormats.length === 1;
+                return (
+                  <label key={fmt} className="flex items-center gap-2 px-2 py-1 rounded-lg hover:bg-p-surface-hover cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      disabled={isLast}
+                      onChange={() => {
+                        setAutoExportFormats(prev =>
+                          prev.includes(fmt)
+                            ? prev.filter(f => f !== fmt)
+                            : [...prev, fmt],
+                        );
+                      }}
+                      className="shrink-0 accent-p-accent"
+                      title={isLast ? 'At least one format must be selected' : undefined}
+                    />
+                    <span className="text-sm text-p-text">{label}</span>
+                  </label>
+                );
+              })}
+            </div>
           </div>
 
           {/* Output notes */}

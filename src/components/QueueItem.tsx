@@ -103,6 +103,11 @@ export default function QueueItem({
           {job.statusMessage}
           {elapsed && job.status === 'done' && ` (${elapsed})`}
           {job.status === 'done' && job.totalPages > 0 && ` \u00b7 ${job.totalPages} pages`}
+          {job.activeModel && job.status === 'converting' && (
+            <span className="ml-1.5 inline-flex items-center text-[10px] font-medium text-p-accent bg-p-accent/10 rounded-full px-1.5 py-0.5">
+              {job.activeModel}
+            </span>
+          )}
         </p>
 
         {/* Progress bar */}
