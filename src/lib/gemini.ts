@@ -103,7 +103,7 @@ export interface GeminiCallOptions {
   onModelSkip?: (skippedModel: string, nextModel: string | null, reason: string) => void;
   onModelStart?: (model: string) => void;
   onStreamProgress?: (phase: 'uploading' | 'processing' | 'streaming', charsReceived: number) => void;
-  onError?: (model: string, reason: string, action: 'retry' | 'skip' | 'fatal') => void;
+  onError?: (model: string, reason: string, action: string) => void;
   abortSignal?: AbortSignal;
   skipModels?: Set<string>;
 }
@@ -129,15 +129,16 @@ async function callGemini(
     throw new Error(`All models failed. Every model in your priority list was skipped due to prior errors: ${skippedList}`);
   }
 
-  // Minimum 2 attempts even with 1 model, to handle transient errors
-  const maxAttempts = Math.max(models.length, 2);
+  // 2 attempts per model before moving to the next one
+  const TRIES_PER_MODEL = 2;
+  const maxAttempts = models.length * TRIES_PER_MODEL;
   const failureLog: { model: string; reason: string }[] = [];
   let lastError: Error | null = null;
   const sizeMB = (pdfBlob.size / 1024 / 1024).toFixed(1);
   console.log(`[gemini] Uploading ${sizeMB} MB PDF via File API`);
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    const model = models[(attempt - 1) % models.length];
+    const model = models[Math.floor((attempt - 1) / TRIES_PER_MODEL) % models.length];
     onModelStart?.(model);
 
     try {
@@ -213,24 +214,24 @@ async function callGemini(
       console.warn(`[gemini] Attempt ${attempt} failed (${model}): ${reason}`);
 
       // If persistent error, add to skipModels so future batches skip this model
+      const nextModelInRotation = attempt < maxAttempts ? models[Math.floor(attempt / TRIES_PER_MODEL) % models.length] : null;
       if (isPersistentError(error) && skipModels) {
         skipModels.add(model);
-        const nextModel = models.find(m => m !== model && !skipModels.has(m)) ?? null;
-        onError?.(model, reason, 'skip');
-        onModelSkip?.(model, nextModel, reason);
+        const nextAvailable = models.find(m => m !== model && !skipModels.has(m)) ?? null;
+        onError?.(model, reason, nextAvailable ? `skipping model, trying ${nextAvailable}` : 'skipping model, no models left');
+        onModelSkip?.(model, nextAvailable, reason);
         console.log(`[gemini] Model ${model} added to skip list (${reason})`);
       } else if (attempt < maxAttempts) {
-        onError?.(model, reason, 'retry');
+        onError?.(model, reason, `retrying with ${nextModelInRotation}`);
       } else {
-        onError?.(model, reason, 'fatal');
+        onError?.(model, reason, 'no retries left');
       }
 
       if (attempt < maxAttempts) {
         const rateLimited = isRateLimitError(error);
         const delaySec = rateLimited ? attempt * 30 : attempt * 5;
-        const nextModel = models[attempt % models.length];
         onRetry?.(attempt + 1, delaySec, rateLimited ? 'rate_limited' : undefined);
-        console.log(`[gemini] Retrying with ${nextModel} in ${delaySec}s...`);
+        console.log(`[gemini] Retrying with ${nextModelInRotation} in ${delaySec}s...`);
         await new Promise(resolve => setTimeout(resolve, delaySec * 1000));
       }
     }
@@ -250,7 +251,7 @@ export async function extractDocumentOutline(
   onModelSkip?: (skippedModel: string, nextModel: string | null, reason: string) => void,
   onModelStart?: (model: string) => void,
   onStreamProgress?: (phase: 'uploading' | 'processing' | 'streaming', charsReceived: number) => void,
-  onError?: (model: string, reason: string, action: 'retry' | 'skip' | 'fatal') => void,
+  onError?: (model: string, reason: string, action: string) => void,
 ): Promise<GeminiResult> {
   return callGemini(pdfBlob, PRESCAN_PROMPT, { onRetry, abortSignal, skipModels, onModelSkip, onModelStart, onStreamProgress, onError });
 }
@@ -267,7 +268,7 @@ export async function convertPdfBatchToMarkdown(
   onModelSkip?: (skippedModel: string, nextModel: string | null, reason: string) => void,
   onModelStart?: (model: string) => void,
   onStreamProgress?: (phase: 'uploading' | 'processing' | 'streaming', charsReceived: number) => void,
-  onError?: (model: string, reason: string, action: 'retry' | 'skip' | 'fatal') => void,
+  onError?: (model: string, reason: string, action: string) => void,
 ): Promise<GeminiResult> {
   const prompt = buildBatchPrompt(batchNum, totalBatches, outline);
   return callGemini(pdfBlob, prompt, { onRetry, abortSignal, skipModels, onModelSkip, onModelStart, onStreamProgress, onError });

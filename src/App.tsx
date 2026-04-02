@@ -234,6 +234,10 @@ export default function App() {
           sourcePath: nextJob.sourcePath || '',
           onProgress: update => {
             updateJob(jobId, update);
+            // Log model changes (covers scanning + batch phases)
+            if (update.activeModel && update.activeModel !== lastActiveModel) {
+              addLogEntry(jobId, fileName, 'info', `Using model: ${update.activeModel}`);
+            }
             if (update.activeModel) lastActiveModel = update.activeModel;
             // Log key phase transitions
             if (update.statusMessage?.startsWith('Scanning document')) {

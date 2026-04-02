@@ -85,9 +85,8 @@ export async function convertFile(options: ConvertFileOptions): Promise<string> 
     onProgress({ streamPhase: phase, streamChars: charsReceived });
   };
 
-  const onError = (model: string, reason: string, action: 'retry' | 'skip' | 'fatal') => {
-    const actionLabel = action === 'skip' ? 'skipping model' : action === 'fatal' ? 'no retries left' : 'retrying';
-    onProgress({ errorDetail: `${model}: ${reason} (${actionLabel})` });
+  const onError = (model: string, reason: string, action: string) => {
+    onProgress({ errorDetail: `${model}: ${reason} (${action})` });
   };
 
   onProgress({ status: 'converting', phase: 'scanning', statusMessage: 'Reading PDF...', startedAt: Date.now() });
