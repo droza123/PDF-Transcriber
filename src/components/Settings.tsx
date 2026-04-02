@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react';
-import { X, Save, GripVertical } from 'lucide-react';
+import { X, Save, GripVertical, RefreshCw } from 'lucide-react';
 import { DndContext, closestCenter, type DragEndEvent } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { getSettings, saveSettings, DEFAULT_MODELS } from '../lib/settings';
-import { getCachedModels } from '../lib/apiKey';
+import { getCachedModels, getApiKey, fetchAvailableModels } from '../lib/apiKey';
 
 interface SettingsProps {
   open: boolean;
@@ -63,6 +63,8 @@ export default function Settings({ open, onClose }: SettingsProps) {
   const [modelPriority, setModelPriority] = useState<string[]>([]);
   const [batchSize, setBatchSize] = useState(10);
   const [outputNotes, setOutputNotes] = useState('');
+  const [refreshing, setRefreshing] = useState(false);
+  const [cachedModels, setCachedModels] = useState<string[]>([]);
 
   useEffect(() => {
     if (open) {
@@ -70,13 +72,29 @@ export default function Settings({ open, onClose }: SettingsProps) {
       setModelPriority(s.modelPriority);
       setBatchSize(s.batchSize);
       setOutputNotes(s.outputNotes);
+      setCachedModels(getCachedModels());
     }
   }, [open]);
 
+  async function handleRefreshModels() {
+    const key = getApiKey();
+    if (!key) return;
+    setRefreshing(true);
+    const models = await fetchAvailableModels(key);
+    if (models.length > 0) {
+      setCachedModels(models);
+      // Remove selected models that are no longer available, but keep at least one
+      setModelPriority(prev => {
+        const stillAvailable = prev.filter(m => models.includes(m));
+        return stillAvailable.length > 0 ? stillAvailable : [models[0]];
+      });
+    }
+    setRefreshing(false);
+  }
+
   if (!open) return null;
 
-  const cached = getCachedModels();
-  const availableModels = cached.length > 0 ? cached : DEFAULT_MODELS;
+  const availableModels = cachedModels.length > 0 ? cachedModels : DEFAULT_MODELS;
   // Include any models from priority that aren't in the available list (e.g. deprecated)
   const allModels = [...new Set([...modelPriority, ...availableModels])];
   const unselected = allModels.filter(m => !modelPriority.includes(m));
@@ -133,9 +151,25 @@ export default function Settings({ open, onClose }: SettingsProps) {
         <div className="space-y-4">
           {/* Model Priority */}
           <div>
-            <label className="block text-sm font-medium text-p-text mb-1">Model priority</label>
-            <p className="text-xs text-p-text-dim mb-2">
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-sm font-medium text-p-text">Model priority</label>
+              <button
+                onClick={handleRefreshModels}
+                disabled={refreshing || !getApiKey()}
+                className="flex items-center gap-1 text-xs text-p-text-dim hover:text-p-text disabled:opacity-30 tab-transition"
+                title="Refresh model list from Google API"
+              >
+                <RefreshCw className={`w-3 h-3 ${refreshing ? 'animate-spin' : ''}`} />
+                {refreshing ? 'Refreshing...' : 'Refresh'}
+              </button>
+            </div>
+            <p className="text-xs text-p-text-dim mb-1.5">
               Models are tried in order during conversion. If one fails, the next is used. Drag to reorder.
+            </p>
+            <p className="text-xs text-p-text-dim/70 mb-2">
+              <strong className="text-p-text-dim">Flash</strong> models are fast and free-tier friendly.{' '}
+              <strong className="text-p-text-dim">Pro</strong> models are slower but better with complex layouts.{' '}
+              <strong className="text-p-text-dim">Preview</strong> versions are newer but may be less stable.
             </p>
             <div className="rounded-lg border border-p-border bg-p-bg-deep overflow-y-auto max-h-48">
               {/* Selected models — sortable */}

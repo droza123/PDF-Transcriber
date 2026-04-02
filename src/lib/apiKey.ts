@@ -44,7 +44,7 @@ export async function fetchAvailableModels(key: string): Promise<string[]> {
         // Only v2+ models handle PDFs well
         /gemini-(2|3|4)/i.test(m.name) &&
         // Exclude thinking/embedding/vision-only variants
-        !/thinking|embedding|aqa|text/i.test(m.name),
+        !/thinking|embedding|aqa|text|tts/i.test(m.name),
       )
       .map((m: any) => m.name.replace('models/', ''))
       .sort()
