@@ -12,6 +12,8 @@ export interface ConversionJob {
   totalPages: number;
   statusMessage: string;
   activeModel?: string;
+  streamPhase?: 'uploading' | 'processing' | 'streaming';
+  streamChars?: number;
   markdown: string | null;
   error: string | null;
   startedAt: number | null;

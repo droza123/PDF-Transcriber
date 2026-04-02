@@ -110,6 +110,21 @@ export default function QueueItem({
           )}
         </p>
 
+        {/* Stream progress indicator */}
+        {job.status === 'converting' && job.streamPhase && (
+          <p className="text-[10px] text-p-text-dim mt-0.5 truncate">
+            {job.streamPhase === 'uploading' && 'Uploading to model...'}
+            {job.streamPhase === 'processing' && 'Waiting for model...'}
+            {job.streamPhase === 'streaming' && (
+              <>
+                Receiving &#x27EB; {job.streamChars && job.streamChars >= 1000
+                  ? `${(job.streamChars / 1000).toFixed(1)}k`
+                  : job.streamChars ?? 0} chars
+              </>
+            )}
+          </p>
+        )}
+
         {/* Progress bar */}
         {job.status === 'converting' && job.phase === 'converting' && (
           <div className="mt-1.5 h-1 bg-p-border rounded-full overflow-hidden">

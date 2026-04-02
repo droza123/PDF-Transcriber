@@ -102,6 +102,7 @@ export interface GeminiCallOptions {
   onRetry?: (attempt: number, delaySec: number, reason?: string) => void;
   onModelSkip?: (skippedModel: string, nextModel: string | null, reason: string) => void;
   onModelStart?: (model: string) => void;
+  onStreamProgress?: (phase: 'uploading' | 'processing' | 'streaming', charsReceived: number) => void;
   abortSignal?: AbortSignal;
   skipModels?: Set<string>;
 }
@@ -117,7 +118,7 @@ async function callGemini(
   prompt: string,
   options: GeminiCallOptions = {},
 ): Promise<GeminiResult> {
-  const { onRetry, onModelSkip, onModelStart, abortSignal, skipModels } = options;
+  const { onRetry, onModelSkip, onModelStart, onStreamProgress, abortSignal, skipModels } = options;
 
   const allModels = getModelPriority();
   const models = allModels.filter(m => !skipModels?.has(m));
@@ -143,6 +144,7 @@ async function callGemini(
 
       const ai = getGeminiClient();
       console.log(`[gemini] Attempt ${attempt}/${maxAttempts} with ${model}: uploading...`);
+      onStreamProgress?.('uploading', 0);
 
       const uploaded = await ai.files.upload({
         file: pdfBlob,
@@ -156,6 +158,7 @@ async function callGemini(
       if (uploaded.name) {
         let fileState = (uploaded as any).state;
         while (fileState === 'PROCESSING') {
+          onStreamProgress?.('processing', 0);
           if (abortSignal?.aborted) throw new DOMException('Cancelled', 'AbortError');
           console.log(`[gemini] File still processing, waiting 2s...`);
           await new Promise(resolve => setTimeout(resolve, 2000));
@@ -189,6 +192,7 @@ async function callGemini(
         if (abortSignal?.aborted) throw new DOMException('Cancelled', 'AbortError');
         const part = chunk.text || '';
         text += part;
+        onStreamProgress?.('streaming', text.length);
       }
       console.log(`[gemini] Streaming complete, received ${text.length} chars`);
 
@@ -239,8 +243,9 @@ export async function extractDocumentOutline(
   skipModels?: Set<string>,
   onModelSkip?: (skippedModel: string, nextModel: string | null, reason: string) => void,
   onModelStart?: (model: string) => void,
+  onStreamProgress?: (phase: 'uploading' | 'processing' | 'streaming', charsReceived: number) => void,
 ): Promise<GeminiResult> {
-  return callGemini(pdfBlob, PRESCAN_PROMPT, { onRetry, abortSignal, skipModels, onModelSkip, onModelStart });
+  return callGemini(pdfBlob, PRESCAN_PROMPT, { onRetry, abortSignal, skipModels, onModelSkip, onModelStart, onStreamProgress });
 }
 
 /** Pass 2: Convert a batch of pages to Markdown, with outline context. */
@@ -254,9 +259,10 @@ export async function convertPdfBatchToMarkdown(
   skipModels?: Set<string>,
   onModelSkip?: (skippedModel: string, nextModel: string | null, reason: string) => void,
   onModelStart?: (model: string) => void,
+  onStreamProgress?: (phase: 'uploading' | 'processing' | 'streaming', charsReceived: number) => void,
 ): Promise<GeminiResult> {
   const prompt = buildBatchPrompt(batchNum, totalBatches, outline);
-  return callGemini(pdfBlob, prompt, { onRetry, abortSignal, skipModels, onModelSkip, onModelStart });
+  return callGemini(pdfBlob, prompt, { onRetry, abortSignal, skipModels, onModelSkip, onModelStart, onStreamProgress });
 }
 
 /** Pause between batches to respect rate limits. */
