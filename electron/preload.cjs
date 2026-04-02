@@ -19,8 +19,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   readPdf: (pdfPath) => ipcRenderer.invoke('persistence:read-pdf', pdfPath),
   fileExists: (filePath) => ipcRenderer.invoke('persistence:file-exists', filePath),
 
-  // DOCX conversion (runs in main process with native footnotes)
-  convertMarkdownToDocx: (markdown) => ipcRenderer.invoke('convert-markdown-to-docx', markdown),
+  // DOCX conversion (runs in worker thread with native footnotes)
+  // format: 'standard' (default) or 'logos' (Logos/Verbum Personal Books)
+  convertMarkdownToDocx: (markdown, format) => ipcRenderer.invoke('convert-markdown-to-docx', markdown, format),
 
   // Find in page
   findInPage: (text, options) => ipcRenderer.invoke('find-in-page', text, options),

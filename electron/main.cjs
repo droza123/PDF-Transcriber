@@ -149,10 +149,11 @@ ipcMain.handle('persistence:file-exists', async (_event, filePath) => {
 });
 
 // IPC: convert markdown to DOCX with native footnotes (runs in worker thread)
-ipcMain.handle('convert-markdown-to-docx', async (_event, markdown) => {
+// format: 'standard' (default) or 'logos' (Logos/Verbum Personal Books)
+ipcMain.handle('convert-markdown-to-docx', async (_event, markdown, format) => {
   return new Promise((resolve, reject) => {
     const worker = new Worker(path.join(__dirname, 'docxWorker.cjs'), {
-      workerData: { markdown },
+      workerData: { markdown, format: format || 'standard' },
     });
     worker.on('message', (msg) => {
       if (msg.error) {

@@ -157,6 +157,7 @@ export async function exportAsDocx(
   fileName: string,
   markdownContent: string,
   onExporting?: (exporting: boolean) => void,
+  format?: 'standard' | 'logos',
 ): Promise<void> {
   try {
     if (!window.electronAPI?.convertMarkdownToDocx) {
@@ -164,7 +165,7 @@ export async function exportAsDocx(
       return;
     }
     onExporting?.(true);
-    const buffer = await window.electronAPI.convertMarkdownToDocx(markdownContent);
+    const buffer = await window.electronAPI.convertMarkdownToDocx(markdownContent, format || 'standard');
     downloadBlob(new Blob([buffer]), fileName.replace(/\.pdf$/i, '.docx'));
   } catch (e: any) {
     console.error('[docx export] Failed:', e);
