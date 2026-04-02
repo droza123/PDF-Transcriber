@@ -14,6 +14,7 @@ export interface ConversionJob {
   activeModel?: string;
   streamPhase?: 'uploading' | 'processing' | 'streaming';
   streamChars?: number;
+  errorDetail?: string;
   markdown: string | null;
   error: string | null;
   startedAt: number | null;

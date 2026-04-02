@@ -225,6 +225,7 @@ export default function App() {
 
         const fileName = nextJob.fileName;
         const conversionStart = Date.now();
+        let lastActiveModel = '';
         addLogEntry(jobId, fileName, 'info', `Started converting ${fileName}`);
 
         const markdown = await convertFile({
@@ -233,20 +234,19 @@ export default function App() {
           sourcePath: nextJob.sourcePath || '',
           onProgress: update => {
             updateJob(jobId, update);
+            if (update.activeModel) lastActiveModel = update.activeModel;
             // Log key phase transitions
             if (update.statusMessage?.startsWith('Scanning document')) {
               addLogEntry(jobId, fileName, 'info', 'Scanning document structure...');
             }
-            if (update.statusMessage?.startsWith('Skipping ')) {
-              addLogEntry(jobId, fileName, 'warn', update.statusMessage);
-            }
-            if (update.statusMessage?.includes('rate limited')) {
-              addLogEntry(jobId, fileName, 'warn', update.statusMessage);
+            // Log every error from the Gemini API
+            if (update.errorDetail) {
+              addLogEntry(jobId, fileName, 'error', update.errorDetail);
             }
           },
           onBatchComplete: async (progress) => {
             await window.electronAPI?.saveProgress(progress);
-            addLogEntry(jobId, fileName, 'info', `Batch ${progress.completedBatches}/${progress.totalBatches} complete`);
+            addLogEntry(jobId, fileName, 'info', `Batch ${progress.completedBatches}/${progress.totalBatches} complete${lastActiveModel ? ` (${lastActiveModel})` : ''}`);
             // Check pause between batches — abort if paused
             if (pausedRef.current) {
               controller.abort();

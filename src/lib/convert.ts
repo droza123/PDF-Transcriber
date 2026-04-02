@@ -85,6 +85,11 @@ export async function convertFile(options: ConvertFileOptions): Promise<string> 
     onProgress({ streamPhase: phase, streamChars: charsReceived });
   };
 
+  const onError = (model: string, reason: string, action: 'retry' | 'skip' | 'fatal') => {
+    const actionLabel = action === 'skip' ? 'skipping model' : action === 'fatal' ? 'no retries left' : 'retrying';
+    onProgress({ errorDetail: `${model}: ${reason} (${actionLabel})` });
+  };
+
   onProgress({ status: 'converting', phase: 'scanning', statusMessage: 'Reading PDF...', startedAt: Date.now() });
 
   const arrayBuffer = await file.arrayBuffer();
@@ -114,6 +119,7 @@ export async function convertFile(options: ConvertFileOptions): Promise<string> 
       onModelSkip,
       onModelStart,
       onStreamProgress,
+      onError,
     );
     outline = result.text;
     onProgress({ streamPhase: undefined, streamChars: 0 });
@@ -161,6 +167,7 @@ export async function convertFile(options: ConvertFileOptions): Promise<string> 
       onModelSkip,
       onModelStart,
       onStreamProgress,
+      onError,
     );
     onProgress({ streamPhase: undefined, streamChars: 0 });
     results.push(stripCodeFences(result.text));
