@@ -103,21 +103,20 @@ export default function QueueItem({
           {job.statusMessage}
           {elapsed && job.status === 'done' && ` (${elapsed})`}
           {job.status === 'done' && job.totalPages > 0 && ` \u00b7 ${job.totalPages} pages`}
-          {job.activeModel && job.status === 'converting' && (
-            <span className="ml-1.5 inline-flex items-center text-[10px] font-medium text-p-accent bg-p-accent/10 rounded-full px-1.5 py-0.5">
-              {job.activeModel}
-            </span>
-          )}
         </p>
 
-        {/* Stream progress indicator */}
+        {/* Stream progress indicator with model name */}
         {job.status === 'converting' && job.streamPhase && (
           <p className="text-[10px] text-p-text-dim mt-0.5 truncate">
+            {job.activeModel && (
+              <span className="font-medium text-p-accent">{job.activeModel}</span>
+            )}
+            {job.activeModel && ' \u27EB '}
             {job.streamPhase === 'uploading' && 'Uploading to model...'}
             {job.streamPhase === 'processing' && 'Waiting for model...'}
             {job.streamPhase === 'streaming' && (
               <>
-                Receiving &#x27EB; {job.streamChars && job.streamChars >= 1000
+                Receiving... {job.streamChars && job.streamChars >= 1000
                   ? `${(job.streamChars / 1000).toFixed(1)}k`
                   : job.streamChars ?? 0} chars
               </>
