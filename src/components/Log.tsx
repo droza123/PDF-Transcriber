@@ -1,5 +1,5 @@
-import { useState, useRef, useEffect } from 'react';
-import { Search, Trash2, Info, AlertTriangle, XCircle, CheckCircle } from 'lucide-react';
+import { useState, useMemo } from 'react';
+import { Search, Trash2, Info, AlertTriangle, XCircle, CheckCircle, ChevronDown, ChevronRight } from 'lucide-react';
 import type { LogEntry } from '../types';
 
 type LevelFilter = 'all' | 'info' | 'success' | 'issues';
@@ -27,18 +27,22 @@ function formatTime(ts: number): string {
   return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
+interface LogGroup {
+  jobId: string;
+  fileName: string;
+  entries: LogEntry[];
+  latestTimestamp: number;
+  hasErrors: boolean;
+}
+
 export default function Log({ entries, onClear }: LogProps) {
   const [search, setSearch] = useState('');
   const [levelFilter, setLevelFilter] = useState<LevelFilter>('all');
   const [confirmClear, setConfirmClear] = useState(false);
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const [collapsedJobs, setCollapsedJobs] = useState<Set<string>>(new Set());
 
-  // Auto-scroll to bottom when new entries arrive
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [entries.length]);
-
-  const filtered = entries.filter(e => {
+  // Filter entries
+  const filtered = useMemo(() => entries.filter(e => {
     if (search && !e.fileName.toLowerCase().includes(search.toLowerCase()) && !e.message.toLowerCase().includes(search.toLowerCase())) {
       return false;
     }
@@ -46,7 +50,49 @@ export default function Log({ entries, onClear }: LogProps) {
     if (levelFilter === 'success') return e.level === 'success';
     if (levelFilter === 'issues') return e.level === 'warn' || e.level === 'error';
     return true;
-  });
+  }), [entries, search, levelFilter]);
+
+  // Group by jobId, sorted newest-first
+  const groups = useMemo(() => {
+    const map = new Map<string, LogGroup>();
+    for (const entry of filtered) {
+      let group = map.get(entry.jobId);
+      if (!group) {
+        group = { jobId: entry.jobId, fileName: entry.fileName, entries: [], latestTimestamp: 0, hasErrors: false };
+        map.set(entry.jobId, group);
+      }
+      group.entries.push(entry);
+      if (entry.timestamp > group.latestTimestamp) group.latestTimestamp = entry.timestamp;
+      if (entry.level === 'error' || entry.level === 'warn') group.hasErrors = true;
+    }
+    const sorted = [...map.values()].sort((a, b) => b.latestTimestamp - a.latestTimestamp);
+    // Reverse entries within each group so newest is on top
+    for (const g of sorted) g.entries.reverse();
+    return sorted;
+  }, [filtered]);
+
+  // Auto-collapse: only the latest group is expanded by default
+  // User toggles override this
+  const latestJobId = groups.length > 0 ? groups[0].jobId : null;
+
+  function toggleGroup(jobId: string) {
+    setCollapsedJobs(prev => {
+      const next = new Set(prev);
+      if (next.has(jobId)) {
+        next.delete(jobId);
+      } else {
+        next.add(jobId);
+      }
+      return next;
+    });
+  }
+
+  function isExpanded(jobId: string): boolean {
+    if (collapsedJobs.has(jobId)) return false;
+    // If user hasn't explicitly toggled, only expand the latest group
+    if (jobId === latestJobId) return true;
+    return false;
+  }
 
   function handleClear() {
     if (!confirmClear) {
@@ -56,6 +102,7 @@ export default function Log({ entries, onClear }: LogProps) {
     }
     onClear();
     setConfirmClear(false);
+    setCollapsedJobs(new Set());
   }
 
   if (entries.length === 0) {
@@ -75,7 +122,7 @@ export default function Log({ entries, onClear }: LogProps) {
 
   return (
     <div className="flex flex-col h-full">
-      {/* Header: search + level filters + clear */}
+      {/* Header: search + clear */}
       <div className="flex items-center gap-2 px-1 mb-2 shrink-0">
         <div className="flex-1 relative">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-p-text-dim" />
@@ -118,29 +165,59 @@ export default function Log({ entries, onClear }: LogProps) {
         ))}
       </div>
 
-      {/* Log entries */}
-      {filtered.length === 0 ? (
+      {/* Grouped log entries */}
+      {groups.length === 0 ? (
         <div className="text-center py-6 text-p-text-dim text-sm">
           No matching entries
         </div>
       ) : (
-        <div className="space-y-0.5 overflow-y-auto flex-1">
-          {filtered.map(entry => {
-            const Icon = LEVEL_ICON[entry.level];
-            const color = LEVEL_COLOR[entry.level];
+        <div className="space-y-1 overflow-y-auto flex-1">
+          {groups.map(group => {
+            const expanded = isExpanded(group.jobId);
+            const errorCount = group.entries.filter(e => e.level === 'error' || e.level === 'warn').length;
             return (
-              <div key={entry.id} className="flex items-start gap-2 px-2 py-1.5 rounded-lg hover:bg-p-surface-hover">
-                <Icon className={`w-3.5 h-3.5 shrink-0 mt-0.5 ${color}`} />
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs text-p-text truncate">{entry.message}</p>
-                  <p className="text-[10px] text-p-text-dim truncate">
-                    {formatTime(entry.timestamp)} &middot; {entry.fileName}
-                  </p>
-                </div>
+              <div key={group.jobId} className="rounded-lg border border-p-border-subtle overflow-hidden">
+                {/* Group header */}
+                <button
+                  onClick={() => toggleGroup(group.jobId)}
+                  className="flex items-center gap-1.5 w-full px-2 py-1.5 text-left hover:bg-p-surface-hover tab-transition"
+                >
+                  {expanded
+                    ? <ChevronDown className="w-3 h-3 text-p-text-dim shrink-0" />
+                    : <ChevronRight className="w-3 h-3 text-p-text-dim shrink-0" />
+                  }
+                  <span className="text-xs font-medium text-p-text truncate flex-1">{group.fileName}</span>
+                  {errorCount > 0 && (
+                    <span className="text-[10px] font-medium text-p-error bg-p-error/10 rounded-full px-1.5 py-0.5 shrink-0">
+                      {errorCount}
+                    </span>
+                  )}
+                  <span className="text-[10px] text-p-text-dim shrink-0">
+                    {group.entries.length}
+                  </span>
+                </button>
+
+                {/* Group entries */}
+                {expanded && (
+                  <div className="border-t border-p-border-subtle">
+                    {group.entries.map(entry => {
+                      const Icon = LEVEL_ICON[entry.level];
+                      const color = LEVEL_COLOR[entry.level];
+                      return (
+                        <div key={entry.id} className="flex items-start gap-2 px-2 py-1 hover:bg-p-surface-hover">
+                          <Icon className={`w-3 h-3 shrink-0 mt-0.5 ${color}`} />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-[11px] text-p-text truncate">{entry.message}</p>
+                            <p className="text-[10px] text-p-text-dim">{formatTime(entry.timestamp)}</p>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             );
           })}
-          <div ref={bottomRef} />
         </div>
       )}
     </div>
