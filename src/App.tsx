@@ -5,6 +5,7 @@ import { createJob } from './types';
 import { hasApiKey } from './lib/apiKey';
 import { convertFile } from './lib/convert';
 import { canSaveToSource, runAutoExport, exportHistoryAsCsv } from './lib/download';
+import { getSettings } from './lib/settings';
 import Header from './components/Header';
 import ApiKeyInput from './components/ApiKeyInput';
 import FileDropZone from './components/FileDropZone';
@@ -181,7 +182,7 @@ export default function App() {
     processingRef.current = true;
 
     // Prevent OS from suspending the app while processing
-    await window.electronAPI?.startPowerBlock();
+    await window.electronAPI?.startPowerBlock(getSettings().preventSleep);
 
     while (true) {
       // Check if paused

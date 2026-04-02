@@ -64,6 +64,7 @@ export default function Settings({ open, onClose }: SettingsProps) {
   const [batchSize, setBatchSize] = useState(10);
   const [outputNotes, setOutputNotes] = useState('');
   const [autoExportFormats, setAutoExportFormats] = useState<ExportFormat[]>(['md']);
+  const [preventSleep, setPreventSleep] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [cachedModels, setCachedModels] = useState<string[]>([]);
 
@@ -74,6 +75,7 @@ export default function Settings({ open, onClose }: SettingsProps) {
       setBatchSize(s.batchSize);
       setOutputNotes(s.outputNotes);
       setAutoExportFormats(s.autoExportFormats);
+      setPreventSleep(s.preventSleep);
       setCachedModels(getCachedModels());
     }
   }, [open]);
@@ -127,7 +129,7 @@ export default function Settings({ open, onClose }: SettingsProps) {
   }
 
   const handleSave = () => {
-    saveSettings({ modelPriority, batchSize, outputNotes, autoExportFormats });
+    saveSettings({ modelPriority, batchSize, outputNotes, autoExportFormats, preventSleep });
     onClose();
   };
 
@@ -268,6 +270,22 @@ export default function Settings({ open, onClose }: SettingsProps) {
                 );
               })}
             </div>
+          </div>
+
+          {/* Prevent sleep */}
+          <div>
+            <label className="flex items-center gap-2 px-2 py-1 rounded-lg hover:bg-p-surface-hover cursor-pointer">
+              <input
+                type="checkbox"
+                checked={preventSleep}
+                onChange={(e) => setPreventSleep(e.target.checked)}
+                className="shrink-0 accent-p-accent"
+              />
+              <span className="text-sm font-medium text-p-text">Prevent sleep during conversion</span>
+            </label>
+            <p className="text-xs text-p-text-dim mt-1 px-2">
+              Keeps your computer awake while transcriptions are running. Useful for long jobs when you'll be away. The display will also stay on.
+            </p>
           </div>
 
           {/* Output notes */}

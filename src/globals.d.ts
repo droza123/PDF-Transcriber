@@ -29,7 +29,7 @@ declare global {
     readPdf: (pdfPath: string) => Promise<ArrayBuffer>;
     fileExists: (filePath: string) => Promise<boolean>;
     convertMarkdownToDocx: (markdown: string, format?: string) => Promise<ArrayBuffer>;
-    startPowerBlock: () => Promise<number>;
+    startPowerBlock: (preventSleep?: boolean) => Promise<number>;
     stopPowerBlock: () => Promise<void>;
     findInPage: (text: string, options?: { findNext?: boolean; forward?: boolean }) => Promise<void>;
     findInPageStop: (action?: string) => Promise<void>;

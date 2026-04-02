@@ -32,7 +32,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   convertMarkdownToDocx: (markdown, format) => ipcRenderer.invoke('convert-markdown-to-docx', markdown, format),
 
   // Power save blocker (prevents OS suspension during conversion)
-  startPowerBlock: () => ipcRenderer.invoke('power:start-blocking'),
+  startPowerBlock: (preventSleep) => ipcRenderer.invoke('power:start-blocking', preventSleep),
   stopPowerBlock: () => ipcRenderer.invoke('power:stop-blocking'),
 
   // Find in page

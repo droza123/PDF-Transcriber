@@ -5,6 +5,7 @@ export interface AppSettings {
   batchSize: number;
   outputNotes: string;
   autoExportFormats: ExportFormat[];
+  preventSleep: boolean;
 }
 
 const STORAGE_KEY = 'app_settings';
@@ -14,6 +15,7 @@ const DEFAULTS: AppSettings = {
   batchSize: 5,
   outputNotes: '',
   autoExportFormats: ['md'],
+  preventSleep: false,
 };
 
 export function getSettings(): AppSettings {

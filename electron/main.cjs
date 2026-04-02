@@ -223,12 +223,13 @@ ipcMain.handle('find-in-page-stop', (_event, action) => {
 // Prevents the OS from sleeping or reducing CPU while conversions are running.
 // The renderer calls these when processing starts/stops.
 
-ipcMain.handle('power:start-blocking', () => {
+ipcMain.handle('power:start-blocking', (_event, preventSleep) => {
   if (powerSaveBlockerId !== null && powerSaveBlocker.isStarted(powerSaveBlockerId)) {
     return powerSaveBlockerId;
   }
-  powerSaveBlockerId = powerSaveBlocker.start('prevent-app-suspension');
-  console.log(`[power] Started power save blocker (id: ${powerSaveBlockerId})`);
+  const type = preventSleep ? 'prevent-display-sleep' : 'prevent-app-suspension';
+  powerSaveBlockerId = powerSaveBlocker.start(type);
+  console.log(`[power] Started power save blocker: ${type} (id: ${powerSaveBlockerId})`);
   return powerSaveBlockerId;
 });
 
