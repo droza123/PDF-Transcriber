@@ -121,7 +121,7 @@ export async function convertFile(options: ConvertFileOptions): Promise<string> 
       onError,
     );
     outline = result.text;
-    onProgress({ streamPhase: undefined, streamChars: 0 });
+    onProgress({ streamPhase: undefined, streamChars: 0, statusMessage: `Structure scan complete (${result.modelUsed})` });
     console.log(`[convert] Document outline extracted (${outline.length} chars)`);
   }
 

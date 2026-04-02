@@ -243,6 +243,9 @@ export default function App() {
             if (update.statusMessage?.startsWith('Scanning document')) {
               addLogEntry(jobId, fileName, 'info', 'Scanning document structure...');
             }
+            if (update.statusMessage?.startsWith('Structure scan complete')) {
+              addLogEntry(jobId, fileName, 'success', update.statusMessage);
+            }
             // Log every error from the Gemini API
             if (update.errorDetail) {
               addLogEntry(jobId, fileName, 'error', update.errorDetail);
