@@ -77,6 +77,10 @@ export async function convertFile(options: ConvertFileOptions): Promise<string> 
     onProgress({ statusMessage: msg });
   };
 
+  const onModelStart = (model: string) => {
+    onProgress({ activeModel: model });
+  };
+
   onProgress({ status: 'converting', phase: 'scanning', statusMessage: 'Reading PDF...', startedAt: Date.now() });
 
   const arrayBuffer = await file.arrayBuffer();
@@ -104,9 +108,9 @@ export async function convertFile(options: ConvertFileOptions): Promise<string> 
       abortSignal,
       skipModels,
       onModelSkip,
+      onModelStart,
     );
     outline = result.text;
-    onProgress({ activeModel: result.modelUsed });
     console.log(`[convert] Document outline extracted (${outline.length} chars)`);
   }
 
@@ -149,9 +153,8 @@ export async function convertFile(options: ConvertFileOptions): Promise<string> 
       abortSignal,
       skipModels,
       onModelSkip,
+      onModelStart,
     );
-
-    onProgress({ activeModel: result.modelUsed });
     results.push(stripCodeFences(result.text));
 
     // Persist partial progress after each batch

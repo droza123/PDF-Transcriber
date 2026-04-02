@@ -101,6 +101,7 @@ function summarizeError(error: any): string {
 export interface GeminiCallOptions {
   onRetry?: (attempt: number, delaySec: number, reason?: string) => void;
   onModelSkip?: (skippedModel: string, nextModel: string | null, reason: string) => void;
+  onModelStart?: (model: string) => void;
   abortSignal?: AbortSignal;
   skipModels?: Set<string>;
 }
@@ -116,7 +117,7 @@ async function callGemini(
   prompt: string,
   options: GeminiCallOptions = {},
 ): Promise<GeminiResult> {
-  const { onRetry, onModelSkip, abortSignal, skipModels } = options;
+  const { onRetry, onModelSkip, onModelStart, abortSignal, skipModels } = options;
 
   const allModels = getModelPriority();
   const models = allModels.filter(m => !skipModels?.has(m));
@@ -135,6 +136,7 @@ async function callGemini(
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     const model = models[(attempt - 1) % models.length];
+    onModelStart?.(model);
 
     try {
       if (abortSignal?.aborted) throw new DOMException('Cancelled', 'AbortError');
@@ -236,8 +238,9 @@ export async function extractDocumentOutline(
   abortSignal?: AbortSignal,
   skipModels?: Set<string>,
   onModelSkip?: (skippedModel: string, nextModel: string | null, reason: string) => void,
+  onModelStart?: (model: string) => void,
 ): Promise<GeminiResult> {
-  return callGemini(pdfBlob, PRESCAN_PROMPT, { onRetry, abortSignal, skipModels, onModelSkip });
+  return callGemini(pdfBlob, PRESCAN_PROMPT, { onRetry, abortSignal, skipModels, onModelSkip, onModelStart });
 }
 
 /** Pass 2: Convert a batch of pages to Markdown, with outline context. */
@@ -250,9 +253,10 @@ export async function convertPdfBatchToMarkdown(
   abortSignal?: AbortSignal,
   skipModels?: Set<string>,
   onModelSkip?: (skippedModel: string, nextModel: string | null, reason: string) => void,
+  onModelStart?: (model: string) => void,
 ): Promise<GeminiResult> {
   const prompt = buildBatchPrompt(batchNum, totalBatches, outline);
-  return callGemini(pdfBlob, prompt, { onRetry, abortSignal, skipModels, onModelSkip });
+  return callGemini(pdfBlob, prompt, { onRetry, abortSignal, skipModels, onModelSkip, onModelStart });
 }
 
 /** Pause between batches to respect rate limits. */

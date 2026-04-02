@@ -11,6 +11,7 @@ const historyPath = path.join(userDataPath, 'history.json');
 const queuePath = path.join(userDataPath, 'queue.json');
 const progressDir = path.join(userDataPath, 'progress');
 const markdownDir = path.join(userDataPath, 'markdown');
+const logPath = path.join(userDataPath, 'log.json');
 
 fs.mkdirSync(progressDir, { recursive: true });
 fs.mkdirSync(markdownDir, { recursive: true });
@@ -135,6 +136,16 @@ ipcMain.handle('persistence:save-history', async (_event, entries) => {
 
 ipcMain.handle('persistence:load-history', async () => {
   return readJson(historyPath, []);
+});
+
+ipcMain.handle('persistence:save-log', async (_event, entries) => {
+  // Cap at 500 entries, keep newest
+  const capped = entries.length > 500 ? entries.slice(-500) : entries;
+  await atomicWriteJson(logPath, capped);
+});
+
+ipcMain.handle('persistence:load-log', async () => {
+  return readJson(logPath, []);
 });
 
 ipcMain.handle('persistence:save-progress', async (_event, progress) => {

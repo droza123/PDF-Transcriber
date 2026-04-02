@@ -21,6 +21,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   deleteProgress: (jobId) => ipcRenderer.invoke('persistence:delete-progress', jobId),
   saveHistory: (entries) => ipcRenderer.invoke('persistence:save-history', entries),
   loadHistory: () => ipcRenderer.invoke('persistence:load-history'),
+  saveLog: (entries) => ipcRenderer.invoke('persistence:save-log', entries),
+  loadLog: () => ipcRenderer.invoke('persistence:load-log'),
   readMarkdown: (mdPath) => ipcRenderer.invoke('persistence:read-markdown', mdPath),
   readPdf: (pdfPath) => ipcRenderer.invoke('persistence:read-pdf', pdfPath),
   fileExists: (filePath) => ipcRenderer.invoke('persistence:file-exists', filePath),

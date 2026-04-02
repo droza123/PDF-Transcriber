@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { PanelLeftClose, PanelLeftOpen } from 'lucide-react';
-import type { ConversionJob, HistoryEntry } from './types';
+import type { ConversionJob, HistoryEntry, LogEntry } from './types';
 import { createJob } from './types';
 import { hasApiKey } from './lib/apiKey';
 import { convertFile } from './lib/convert';
@@ -10,6 +10,7 @@ import ApiKeyInput from './components/ApiKeyInput';
 import FileDropZone from './components/FileDropZone';
 import Queue from './components/Queue';
 import History from './components/History';
+import Log from './components/Log';
 import Preview from './components/Preview';
 import Settings from './components/Settings';
 
@@ -20,7 +21,8 @@ export default function App() {
   const [keyPresent, setKeyPresent] = useState(hasApiKey);
   const [jobs, setJobs] = useState<ConversionJob[]>([]);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
-  const [sidebarTab, setSidebarTab] = useState<'queue' | 'history'>('queue');
+  const [sidebarTab, setSidebarTab] = useState<'queue' | 'history' | 'log'>('queue');
+  const [logEntries, setLogEntries] = useState<LogEntry[]>([]);
   const [previewJobId, setPreviewJobId] = useState<string | null>(null);
   const [previewSource, setPreviewSource] = useState<'queue' | 'history'>('queue');
   const [historyMarkdown, setHistoryMarkdown] = useState<string | null>(null);
@@ -56,6 +58,9 @@ export default function App() {
 
       const savedHistory = await window.electronAPI.loadHistory();
       setHistory(savedHistory);
+
+      const savedLog = await window.electronAPI.loadLog();
+      setLogEntries(savedLog);
 
       const savedQueue = await window.electronAPI.loadQueue();
       if (savedQueue.length === 0) return;
@@ -149,6 +154,27 @@ export default function App() {
     window.electronAPI?.saveHistory(history);
   }, [history]);
 
+  // Persist log
+  const logInitialized = useRef(false);
+  useEffect(() => {
+    if (!logInitialized.current) {
+      logInitialized.current = true;
+      return;
+    }
+    window.electronAPI?.saveLog(logEntries);
+  }, [logEntries]);
+
+  const addLogEntry = useCallback((jobId: string, fileName: string, level: LogEntry['level'], message: string) => {
+    setLogEntries(prev => [...prev, {
+      id: crypto.randomUUID(),
+      timestamp: Date.now(),
+      jobId,
+      fileName,
+      level,
+      message,
+    }]);
+  }, []);
+
   // ── Process queue sequentially ────────────────────────────────────────────
   const processQueue = useCallback(async () => {
     if (processingRef.current) return;
@@ -197,13 +223,30 @@ export default function App() {
           resumeFrom = (await window.electronAPI?.loadProgress(jobId)) ?? undefined;
         }
 
+        const fileName = nextJob.fileName;
+        const conversionStart = Date.now();
+        addLogEntry(jobId, fileName, 'info', `Started converting ${fileName}`);
+
         const markdown = await convertFile({
           file: fileObj,
           jobId,
           sourcePath: nextJob.sourcePath || '',
-          onProgress: update => updateJob(jobId, update),
+          onProgress: update => {
+            updateJob(jobId, update);
+            // Log key phase transitions
+            if (update.statusMessage?.startsWith('Scanning document')) {
+              addLogEntry(jobId, fileName, 'info', 'Scanning document structure...');
+            }
+            if (update.statusMessage?.startsWith('Skipping ')) {
+              addLogEntry(jobId, fileName, 'warn', update.statusMessage);
+            }
+            if (update.statusMessage?.includes('rate limited')) {
+              addLogEntry(jobId, fileName, 'warn', update.statusMessage);
+            }
+          },
           onBatchComplete: async (progress) => {
             await window.electronAPI?.saveProgress(progress);
+            addLogEntry(jobId, fileName, 'info', `Batch ${progress.completedBatches}/${progress.totalBatches} complete`);
             // Check pause between batches — abort if paused
             if (pausedRef.current) {
               controller.abort();
@@ -231,6 +274,13 @@ export default function App() {
           }
         }
 
+        // Log completion and export results
+        const duration = Math.round((Date.now() - conversionStart) / 1000);
+        addLogEntry(jobId, fileName, 'success', `Completed in ${duration}s`);
+        if (saveError) {
+          addLogEntry(jobId, fileName, 'warn', `Export issues: ${saveError}`);
+        }
+
         updateJob(jobId, {
           status: 'done',
           progress: 100,
@@ -248,6 +298,7 @@ export default function App() {
         const isPaused = isCancelled && pausedRef.current;
 
         if (isPaused) {
+          addLogEntry(jobId, nextJob.fileName, 'info', 'Paused by user');
           // Re-queue the job with partial progress for later resume
           const progress = await window.electronAPI?.loadProgress(jobId);
           updateJob(jobId, {
@@ -262,11 +313,20 @@ export default function App() {
             completedAt: null,
             resumeFrom: progress?.completedBatches,
           });
-        } else {
+        } else if (isCancelled) {
+          addLogEntry(jobId, nextJob.fileName, 'info', 'Cancelled by user');
           updateJob(jobId, {
             status: 'error',
-            error: isCancelled ? 'Cancelled by user' : (error.message || 'Conversion failed'),
-            statusMessage: isCancelled ? 'Cancelled' : 'Error',
+            error: 'Cancelled by user',
+            statusMessage: 'Cancelled',
+            completedAt: Date.now(),
+          });
+        } else {
+          addLogEntry(jobId, nextJob.fileName, 'error', error.message || 'Conversion failed');
+          updateJob(jobId, {
+            status: 'error',
+            error: error.message || 'Conversion failed',
+            statusMessage: 'Error',
             completedAt: Date.now(),
           });
         }
@@ -276,7 +336,7 @@ export default function App() {
     }
 
     processingRef.current = false;
-  }, [updateJob]);
+  }, [updateJob, addLogEntry]);
 
   // ── Kick queue when jobs appear ───────────────────────────────────────────
   const prevJobCount = useRef(0);
@@ -549,6 +609,16 @@ export default function App() {
                 >
                   History{history.length > 0 ? ` (${history.length})` : ''}
                 </button>
+                <button
+                  onClick={() => setSidebarTab('log')}
+                  className={`px-3 py-1.5 text-xs rounded-md tab-transition ${
+                    sidebarTab === 'log'
+                      ? 'bg-p-accent/15 text-p-accent font-medium'
+                      : 'text-p-text-dim hover:text-p-text hover:bg-p-surface-hover'
+                  }`}
+                >
+                  Log{logEntries.length > 0 ? ` (${logEntries.length})` : ''}
+                </button>
               </div>
 
               {/* Tab content */}
@@ -566,7 +636,7 @@ export default function App() {
                     onTogglePause={togglePause}
                     onReorder={reorderJobs}
                   />
-                ) : (
+                ) : sidebarTab === 'history' ? (
                   <History
                     entries={history}
                     searchQuery={historySearch}
@@ -578,6 +648,11 @@ export default function App() {
                     onClearAll={clearHistory}
                     onReconvert={reconvertFromHistory}
                     onExport={handleExportHistory}
+                  />
+                ) : (
+                  <Log
+                    entries={logEntries}
+                    onClear={() => setLogEntries([])}
                   />
                 )}
               </div>

@@ -1,4 +1,4 @@
-import type { SerializedQueueEntry, HistoryEntry, PartialProgress } from './types';
+import type { SerializedQueueEntry, HistoryEntry, PartialProgress, LogEntry } from './types';
 
 declare global {
   namespace NodeJS {
@@ -23,6 +23,8 @@ declare global {
     deleteProgress: (jobId: string) => Promise<void>;
     saveHistory: (entries: HistoryEntry[]) => Promise<void>;
     loadHistory: () => Promise<HistoryEntry[]>;
+    saveLog: (entries: LogEntry[]) => Promise<void>;
+    loadLog: () => Promise<LogEntry[]>;
     readMarkdown: (mdPath: string) => Promise<string | null>;
     readPdf: (pdfPath: string) => Promise<ArrayBuffer>;
     fileExists: (filePath: string) => Promise<boolean>;

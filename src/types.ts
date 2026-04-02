@@ -55,6 +55,16 @@ export interface PartialProgress {
   results: string[];
 }
 
+/** A single entry in the conversion log. */
+export interface LogEntry {
+  id: string;
+  timestamp: number;
+  jobId: string;
+  fileName: string;
+  level: 'info' | 'warn' | 'error' | 'success';
+  message: string;
+}
+
 export function createJob(file: File): ConversionJob {
   // Use Electron's webUtils.getPathForFile (exposed via preload) to get the full path
   const sourcePath = window.electronAPI?.getFilePath(file) || null;

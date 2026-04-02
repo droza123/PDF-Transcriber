@@ -224,7 +224,7 @@ export default function Settings({ open, onClose }: SettingsProps) {
               onChange={(e) => setBatchSize(Number(e.target.value))}
               className="w-full rounded-lg border border-p-border bg-p-bg px-3 py-2 text-sm text-p-text tab-transition focus:outline-none focus:border-p-accent"
             >
-              {[5, 10, 15, 20].map((n) => (
+              {[1, 2, 3, 5, 10, 15, 20].map((n) => (
                 <option key={n} value={n}>
                   {n}
                 </option>

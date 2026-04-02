@@ -11,7 +11,7 @@ const STORAGE_KEY = 'app_settings';
 
 const DEFAULTS: AppSettings = {
   modelPriority: ['gemini-2.5-flash', 'gemini-3-flash-preview'],
-  batchSize: 10,
+  batchSize: 5,
   outputNotes: '',
   autoExportFormats: ['md'],
 };
