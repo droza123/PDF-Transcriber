@@ -99,7 +99,7 @@ export default function QueueItem({
 
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1.5">
-          <p className="text-sm font-medium text-p-text truncate">{job.fileName}</p>
+          <p className="text-sm font-medium text-p-text truncate" title={job.fileName}>{job.fileName}</p>
           {job.translationLanguage && (
             <span className="text-[10px] font-medium text-sky-400 bg-sky-400/10 rounded-full px-1.5 py-0.5 shrink-0">
               → {job.translationLanguage}

@@ -40,7 +40,7 @@ export default function HistoryItem({ entry, isActive, onPreview, onShowInFolder
       <FileText className="w-4 h-4 text-p-text-dim shrink-0" />
 
       <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium text-p-text truncate">{entry.fileName}</p>
+        <p className="text-sm font-medium text-p-text truncate" title={entry.fileName}>{entry.fileName}</p>
         <p className="text-xs text-p-text-muted truncate">
           {formatDate(entry.convertedAt)}
           {' \u00b7 '}

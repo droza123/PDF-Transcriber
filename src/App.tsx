@@ -128,14 +128,14 @@ export default function App() {
         }
       }
 
-      // Save only queued/converting jobs to queue.json
+      // Save unfinished jobs to queue.json (queued, converting, or errored)
       const entries = jobs
-        .filter(j => j.status === 'queued' || j.status === 'converting')
+        .filter(j => j.status === 'queued' || j.status === 'converting' || j.status === 'error')
         .map(j => ({
           id: j.id,
           fileName: j.fileName,
           sourcePath: j.sourcePath!,
-          status: (j.status === 'converting' ? 'interrupted' : 'queued') as 'queued' | 'interrupted',
+          status: (j.status === 'error' ? 'queued' : j.status === 'converting' ? 'interrupted' : 'queued') as 'queued' | 'interrupted',
           totalPages: j.totalPages,
           totalBatches: j.totalBatches,
           completedBatches: j.currentBatch,

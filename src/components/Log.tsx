@@ -75,13 +75,18 @@ export default function Log({ entries, onClear }: LogProps) {
   // User toggles override this
   const latestJobId = groups.length > 0 ? groups[0].jobId : null;
 
+  // Track explicit user toggles: 'expanded' or 'collapsed'
   function toggleGroup(jobId: string) {
     setCollapsedJobs(prev => {
       const next = new Set(prev);
-      if (next.has(jobId)) {
-        next.delete(jobId);
-      } else {
+      // If currently expanded (either explicitly toggled open, or latest by default), collapse it
+      if (isExpanded(jobId)) {
         next.add(jobId);
+        next.delete('_open_' + jobId);
+      } else {
+        // Currently collapsed — expand it
+        next.delete(jobId);
+        next.add('_open_' + jobId);
       }
       return next;
     });
@@ -89,9 +94,9 @@ export default function Log({ entries, onClear }: LogProps) {
 
   function isExpanded(jobId: string): boolean {
     if (collapsedJobs.has(jobId)) return false;
-    // If user hasn't explicitly toggled, only expand the latest group
-    if (jobId === latestJobId) return true;
-    return false;
+    if (collapsedJobs.has('_open_' + jobId)) return true;
+    // Default: only the latest group is expanded
+    return jobId === latestJobId;
   }
 
   function handleClear() {
@@ -186,7 +191,7 @@ export default function Log({ entries, onClear }: LogProps) {
                     ? <ChevronDown className="w-3 h-3 text-p-text-dim shrink-0" />
                     : <ChevronRight className="w-3 h-3 text-p-text-dim shrink-0" />
                   }
-                  <span className="text-xs font-medium text-p-text truncate flex-1">{group.fileName}</span>
+                  <span className="text-xs font-medium text-p-text truncate flex-1" title={group.fileName}>{group.fileName}</span>
                   {errorCount > 0 && (
                     <span className="text-[10px] font-medium text-p-error bg-p-error/10 rounded-full px-1.5 py-0.5 shrink-0">
                       {errorCount}
@@ -207,7 +212,7 @@ export default function Log({ entries, onClear }: LogProps) {
                         <div key={entry.id} className="flex items-start gap-2 px-2 py-1 hover:bg-p-surface-hover">
                           <Icon className={`w-3 h-3 shrink-0 mt-0.5 ${color}`} />
                           <div className="flex-1 min-w-0">
-                            <p className="text-[11px] text-p-text truncate">{entry.message}</p>
+                            <p className="text-[11px] text-p-text truncate" title={entry.message}>{entry.message}</p>
                             <p className="text-[10px] text-p-text-dim">{formatTime(entry.timestamp)}</p>
                           </div>
                         </div>
