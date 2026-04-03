@@ -2,7 +2,7 @@ export type ExportFormat = 'md' | 'html' | 'docx' | 'docx-logos';
 export type FileNaming = 'overwrite' | 'unique';
 
 export const DEFAULT_TRANSLATION_LANGUAGES = [
-  'Spanish', 'French', 'German', 'Portuguese', 'Italian',
+  'English', 'Spanish', 'French', 'German', 'Portuguese', 'Italian',
   'Chinese (Simplified)', 'Chinese (Traditional)', 'Japanese', 'Korean',
   'Arabic', 'Russian', 'Dutch', 'Polish', 'Swedish', 'Turkish', 'Hindi',
 ];
