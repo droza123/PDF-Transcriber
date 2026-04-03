@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback } from 'react';
-import { Upload, FileUp, Languages } from 'lucide-react';
+import { Upload, FileUp } from 'lucide-react';
 import { getSettings, saveSettings } from '../lib/settings';
 
 interface FileDropZoneProps {
@@ -92,23 +92,34 @@ export default function FileDropZone({ onFilesAdded, disabled }: FileDropZonePro
       </div>
 
       {/* Translation selector */}
+      {/* Mode toggle: Transcribe / Translate */}
       {languages.length > 0 && (
         <div
-          className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs"
+          className="flex items-center gap-2 px-3 py-1.5 text-xs"
           onClick={e => e.stopPropagation()}
         >
-          <button
-            onClick={toggleTranslation}
-            className={`flex items-center gap-1.5 px-2 py-1 rounded-md tab-transition ${
-              transEnabled
-                ? 'bg-sky-400/15 text-sky-400'
-                : 'text-p-text-dim hover:text-p-text hover:bg-p-surface-hover'
-            }`}
-            title={transEnabled ? 'Translation enabled — click to disable' : 'Enable translation'}
-          >
-            <Languages className="w-3.5 h-3.5" />
-            Translate
-          </button>
+          <div className="inline-flex rounded-full border border-p-border bg-p-bg-deep p-0.5">
+            <button
+              onClick={() => { setTransEnabled(false); saveSettings({ translationEnabled: false }); }}
+              className={`px-3 py-1 rounded-full tab-transition ${
+                !transEnabled
+                  ? 'bg-p-accent text-white font-medium'
+                  : 'text-p-text-dim hover:text-p-text'
+              }`}
+            >
+              Transcribe
+            </button>
+            <button
+              onClick={() => { setTransEnabled(true); saveSettings({ translationEnabled: true }); }}
+              className={`px-3 py-1 rounded-full tab-transition ${
+                transEnabled
+                  ? 'bg-sky-500 text-white font-medium'
+                  : 'text-p-text-dim hover:text-p-text'
+              }`}
+            >
+              Translate
+            </button>
+          </div>
           {transEnabled && (
             <select
               value={transLang}
