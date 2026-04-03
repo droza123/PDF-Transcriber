@@ -379,10 +379,10 @@ function makeRuns(text, fnKeyToIndex, docx, usedFootnoteIds) {
   return runs;
 }
 
-/** Parse **bold**, *italic*, ***bold+italic*** into TextRun array with Times New Roman. */
+/** Parse **bold**, *italic*, ***bold+italic***, and <br> into TextRun array with Times New Roman. */
 function formatText(text, TextRun) {
   const runs = [];
-  const regex = /(\*\*\*(.+?)\*\*\*|\*\*(.+?)\*\*|\*(.+?)\*)/g;
+  const regex = /(\*\*\*(.+?)\*\*\*|\*\*(.+?)\*\*|\*(.+?)\*|<br\s*\/?>)/gi;
   let lastIdx = 0;
   let match;
 
@@ -396,6 +396,9 @@ function formatText(text, TextRun) {
       runs.push(new TextRun({ text: match[3], bold: true, font: 'Times New Roman' }));
     } else if (match[4]) {
       runs.push(new TextRun({ text: match[4], italics: true, font: 'Times New Roman' }));
+    } else {
+      // <br> tag — insert a line break
+      runs.push(new TextRun({ break: 1, font: 'Times New Roman' }));
     }
     lastIdx = regex.lastIndex;
   }
