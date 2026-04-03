@@ -3,7 +3,7 @@ import { X, Save, GripVertical, RefreshCw, Info } from 'lucide-react';
 import { DndContext, closestCenter, type DragEndEvent } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { getSettings, saveSettings, DEFAULT_MODELS, getSessionSkippedModels, type ExportFormat } from '../lib/settings';
+import { getSettings, saveSettings, DEFAULT_MODELS, getSessionSkippedModels, type ExportFormat, type FileNaming } from '../lib/settings';
 import { getCachedModels, getApiKey, fetchAvailableModels } from '../lib/apiKey';
 
 interface SettingsProps {
@@ -82,6 +82,7 @@ export default function Settings({ open, onClose }: SettingsProps) {
   const [batchSize, setBatchSize] = useState(10);
   const [outputNotes, setOutputNotes] = useState('');
   const [autoExportFormats, setAutoExportFormats] = useState<ExportFormat[]>(['md']);
+  const [fileNaming, setFileNaming] = useState<FileNaming>('overwrite');
   const [preventSleep, setPreventSleep] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [cachedModels, setCachedModels] = useState<string[]>([]);
@@ -94,6 +95,7 @@ export default function Settings({ open, onClose }: SettingsProps) {
       setBatchSize(s.batchSize);
       setOutputNotes(s.outputNotes);
       setAutoExportFormats(s.autoExportFormats);
+      setFileNaming(s.fileNaming);
       setPreventSleep(s.preventSleep);
       setCachedModels(getCachedModels());
       setSkippedModels(new Map(getSessionSkippedModels()));
@@ -149,7 +151,7 @@ export default function Settings({ open, onClose }: SettingsProps) {
   }
 
   const handleSave = () => {
-    saveSettings({ modelPriority, batchSize, outputNotes, autoExportFormats, preventSleep });
+    saveSettings({ modelPriority, batchSize, outputNotes, autoExportFormats, fileNaming, preventSleep });
     onClose();
   };
 
@@ -295,6 +297,16 @@ export default function Settings({ open, onClose }: SettingsProps) {
                 );
               })}
             </div>
+
+            <label className="block text-sm font-medium text-p-text mt-3 mb-1.5">If file already exists</label>
+            <select
+              value={fileNaming}
+              onChange={(e) => setFileNaming(e.target.value as FileNaming)}
+              className="w-full rounded-lg border border-p-border bg-p-bg px-3 py-2 text-sm text-p-text tab-transition focus:outline-none focus:border-p-accent"
+            >
+              <option value="overwrite">Overwrite existing file</option>
+              <option value="unique">Create new file with number suffix</option>
+            </select>
           </div>
 
           {/* Prevent sleep */}

@@ -1,4 +1,5 @@
 export type ExportFormat = 'md' | 'html' | 'docx' | 'docx-logos';
+export type FileNaming = 'overwrite' | 'unique';
 
 export interface AppSettings {
   modelPriority: string[];
@@ -6,6 +7,7 @@ export interface AppSettings {
   outputNotes: string;
   autoExportFormats: ExportFormat[];
   preventSleep: boolean;
+  fileNaming: FileNaming;
 }
 
 const STORAGE_KEY = 'app_settings';
@@ -16,6 +18,7 @@ const DEFAULTS: AppSettings = {
   outputNotes: '',
   autoExportFormats: ['md'],
   preventSleep: false,
+  fileNaming: 'overwrite',
 };
 
 export function getSettings(): AppSettings {

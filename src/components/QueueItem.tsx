@@ -139,6 +139,13 @@ export default function QueueItem({
           <p className="text-xs text-p-error mt-1 truncate">{job.error}</p>
         )}
 
+        {/* Export errors */}
+        {job.status === 'done' && job.exportErrors && (
+          <p className="text-xs text-amber-400 mt-0.5 truncate" title={job.exportErrors}>
+            Export failed: {job.exportErrors}
+          </p>
+        )}
+
         {/* Previous conversion warning */}
         {job.previousConversion && (
           <p className="text-p-warning text-xs mt-0.5">

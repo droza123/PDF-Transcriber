@@ -11,9 +11,9 @@ declare global {
 
   interface ElectronAPI {
     getFilePath: (file: File) => string;
-    saveMarkdown: (sourcePdfPath: string, content: string) => Promise<string>;
+    saveMarkdown: (sourcePdfPath: string, content: string, unique?: boolean) => Promise<string>;
     showInFolder: (filePath: string) => Promise<void>;
-    saveFile: (sourcePdfPath: string, data: string | ArrayBuffer, extension: string) => Promise<string>;
+    saveFile: (sourcePdfPath: string, data: string | ArrayBuffer, extension: string, unique?: boolean) => Promise<string>;
     saveInternalMarkdown: (jobId: string, content: string) => Promise<string>;
     loadInternalMarkdown: (jobId: string) => Promise<string | null>;
     saveQueue: (entries: SerializedQueueEntry[]) => Promise<void>;

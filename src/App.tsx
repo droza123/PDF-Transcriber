@@ -297,11 +297,10 @@ export default function App() {
           progress: 100,
           markdown,
           savedPath,
-          statusMessage: savedPath
-            ? 'Saved'
-            : saveError
-              ? `Done (${saveError})`
-              : 'Done',
+          exportErrors: saveError || undefined,
+          statusMessage: saveError
+            ? savedPath ? 'Saved (some exports failed)' : `Done (${saveError})`
+            : savedPath ? 'Saved' : 'Done',
           completedAt: Date.now(),
         });
       } catch (error: any) {

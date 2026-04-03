@@ -86,10 +86,31 @@ function createWindow() {
 
 // ── IPC: file operations ─────────────────────────────────────────────────────
 
-ipcMain.handle('save-markdown', async (_event, sourcePdfPath, content) => {
+/** If `unique` is true, append (1), (2), etc. to avoid overwriting an existing file. */
+async function ensureUniquePath(filePath) {
+  try {
+    await fs.promises.access(filePath);
+  } catch {
+    return filePath; // doesn't exist — use as-is
+  }
+  const dir = path.dirname(filePath);
+  const ext = path.extname(filePath);
+  const base = path.basename(filePath, ext);
+  for (let i = 1; ; i++) {
+    const candidate = path.join(dir, `${base} (${i})${ext}`);
+    try {
+      await fs.promises.access(candidate);
+    } catch {
+      return candidate;
+    }
+  }
+}
+
+ipcMain.handle('save-markdown', async (_event, sourcePdfPath, content, unique) => {
   const dir = path.dirname(sourcePdfPath);
   const baseName = path.basename(sourcePdfPath, path.extname(sourcePdfPath));
-  const mdPath = path.join(dir, baseName + '.md');
+  let mdPath = path.join(dir, baseName + '.md');
+  if (unique) mdPath = await ensureUniquePath(mdPath);
   await fs.promises.writeFile(mdPath, content, 'utf-8');
   return mdPath;
 });
@@ -98,10 +119,11 @@ ipcMain.handle('show-in-folder', async (_event, filePath) => {
   shell.showItemInFolder(filePath);
 });
 
-ipcMain.handle('save-file', async (_event, sourcePdfPath, data, extension) => {
+ipcMain.handle('save-file', async (_event, sourcePdfPath, data, extension, unique) => {
   const dir = path.dirname(sourcePdfPath);
   const baseName = path.basename(sourcePdfPath, path.extname(sourcePdfPath));
-  const filePath = path.join(dir, baseName + '.' + extension);
+  let filePath = path.join(dir, baseName + '.' + extension);
+  if (unique) filePath = await ensureUniquePath(filePath);
   const content = typeof data === 'string' ? data : Buffer.from(data);
   await fs.promises.writeFile(filePath, content);
   return filePath;

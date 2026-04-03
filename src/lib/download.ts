@@ -186,7 +186,8 @@ export async function runAutoExport(
   const api = window.electronAPI;
   if (!api) return { savedPath: null, errors: [] };
 
-  const { autoExportFormats } = getSettings();
+  const { autoExportFormats, fileNaming } = getSettings();
+  const unique = fileNaming === 'unique';
   const errors: string[] = [];
   let savedPath: string | null = null;
 
@@ -201,28 +202,23 @@ export async function runAutoExport(
     try {
       switch (fmt) {
         case 'md': {
-          savedPath = await api.saveMarkdown(sourcePath, markdown);
+          savedPath = await api.saveMarkdown(sourcePath, markdown, unique);
           break;
         }
         case 'html': {
           const title = fileName.replace(/\.pdf$/i, '');
           const html = await renderMarkdownToHtml(markdown, title);
-          await api.saveFile(sourcePath, html, 'html');
+          await api.saveFile(sourcePath, html, 'html', unique);
           break;
         }
         case 'docx': {
           const buffer = await api.convertMarkdownToDocx(markdown, 'standard');
-          await api.saveFile(sourcePath, buffer, 'docx');
+          await api.saveFile(sourcePath, buffer, 'docx', unique);
           break;
         }
         case 'docx-logos': {
           const buffer = await api.convertMarkdownToDocx(markdown, 'logos');
-          // Use a distinct filename to avoid overwriting standard .docx
-          const dir = sourcePath.replace(/[/\\][^/\\]+$/, '');
-          const base = fileName.replace(/\.pdf$/i, '');
-          // Save via saveFile which derives path from sourcePath, but logos uses same .docx ext
-          // So we save it with a suffix by writing directly
-          await api.saveFile(sourcePath, buffer, 'logos.docx');
+          await api.saveFile(sourcePath, buffer, 'logos.docx', unique);
           break;
         }
       }

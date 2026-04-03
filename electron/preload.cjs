@@ -2,12 +2,12 @@ const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 contextBridge.exposeInMainWorld('electronAPI', {
   getFilePath: (file) => webUtils.getPathForFile(file),
-  saveMarkdown: (sourcePdfPath, content) =>
-    ipcRenderer.invoke('save-markdown', sourcePdfPath, content),
+  saveMarkdown: (sourcePdfPath, content, unique) =>
+    ipcRenderer.invoke('save-markdown', sourcePdfPath, content, unique),
   showInFolder: (filePath) =>
     ipcRenderer.invoke('show-in-folder', filePath),
-  saveFile: (sourcePdfPath, data, extension) =>
-    ipcRenderer.invoke('save-file', sourcePdfPath, data, extension),
+  saveFile: (sourcePdfPath, data, extension, unique) =>
+    ipcRenderer.invoke('save-file', sourcePdfPath, data, extension, unique),
   saveInternalMarkdown: (jobId, content) =>
     ipcRenderer.invoke('save-internal-markdown', jobId, content),
   loadInternalMarkdown: (jobId) =>
