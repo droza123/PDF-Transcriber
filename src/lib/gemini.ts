@@ -43,16 +43,17 @@ Layout awareness:
 
 Content rules:
 1. Use the heading hierarchy from the outline above to determine correct heading levels (# ## ### etc.). Match headings to the outline — do not guess levels independently.
-2. Preserve paragraph structure with blank lines between paragraphs.
-3. Convert tables to Markdown table syntax.
-4. Preserve footnotes using [^N] syntax with definitions at section end.
-5. Preserve endnotes and bibliographic references EXACTLY as written.
-6. Describe figures/images in [brackets], e.g. [Figure 3: Bar chart of enrollment].
-7. Fix hyphenation artifacts from PDF line-breaking.
-8. Preserve block quotes using > syntax.
-9. Preserve numbered and bulleted lists exactly.
-10. Do not add commentary — output only document content as Markdown.
-11. Never duplicate content — each passage of text should appear exactly once.${extra}`;
+2. If the document has a table of contents, render its entries as plain text — not as headings. Only use heading syntax for actual chapter/section titles in the body.
+3. Preserve paragraph structure with blank lines between paragraphs.
+4. Convert tables to Markdown table syntax.
+5. Preserve footnotes using [^N] syntax with definitions at section end.
+6. Preserve endnotes and bibliographic references EXACTLY as written.
+7. Describe figures/images in [brackets], e.g. [Figure 3: Bar chart of enrollment].
+8. Fix hyphenation artifacts from PDF line-breaking.
+9. Preserve block quotes using > syntax.
+10. Preserve numbered and bulleted lists exactly.
+11. Do not add commentary — output only document content as Markdown.
+12. Never duplicate content — each passage of text should appear exactly once.${extra}`;
 }
 
 function getGeminiClient(): GoogleGenAI {
