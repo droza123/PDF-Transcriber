@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Eye, EyeOff, Save, X, Trash2, ChevronDown, ChevronRight, ExternalLink, Loader2, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { getApiKey, setApiKey, clearApiKey, validateApiKey, fetchAvailableModels } from '../lib/apiKey';
+import { initializeModelPriority } from '../lib/settings';
 
 interface ApiKeyInputProps {
   onKeyChanged: () => void;
@@ -37,8 +38,10 @@ export default function ApiKeyInput({ onKeyChanged }: ApiKeyInputProps) {
       setValidating(false);
       setValidationResult('success');
       onKeyChanged();
-      // Fetch available models in the background
-      fetchAvailableModels(key);
+      // Fetch available models and set initial priority based on what exists
+      fetchAvailableModels(key).then(models => {
+        if (models.length > 0) initializeModelPriority(models);
+      });
       setTimeout(() => setValidationResult(null), 3000);
     } else {
       setValidating(false);
