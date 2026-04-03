@@ -50,3 +50,15 @@ export function getPrimaryModel(): string {
 }
 
 export const DEFAULT_MODELS = ['gemini-3-flash-preview', 'gemini-2.5-flash'];
+
+// ── Session-level skipped model tracking (not persisted across app restarts) ──
+
+const sessionSkippedModels = new Map<string, string>();
+
+export function getSessionSkippedModels(): ReadonlyMap<string, string> {
+  return sessionSkippedModels;
+}
+
+export function addSessionSkippedModel(model: string, reason: string): void {
+  sessionSkippedModels.set(model, reason);
+}

@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
-import { X, Save, GripVertical, RefreshCw } from 'lucide-react';
+import { X, Save, GripVertical, RefreshCw, Info } from 'lucide-react';
 import { DndContext, closestCenter, type DragEndEvent } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { getSettings, saveSettings, DEFAULT_MODELS, type ExportFormat } from '../lib/settings';
+import { getSettings, saveSettings, DEFAULT_MODELS, getSessionSkippedModels, type ExportFormat } from '../lib/settings';
 import { getCachedModels, getApiKey, fetchAvailableModels } from '../lib/apiKey';
 
 interface SettingsProps {
@@ -11,16 +11,33 @@ interface SettingsProps {
   onClose: () => void;
 }
 
+function SkippedBadge({ reason }: { reason: string }) {
+  const label = reason === 'rate limited' ? 'Rate limited' : 'Skipped';
+  const detail = reason === 'rate limited'
+    ? `This model was rate limited during this session and will be skipped for remaining batches. Restart the app to retry.`
+    : `This model was skipped due to: ${reason}. It will not be used for remaining batches. Restart the app to retry.`;
+  return (
+    <span
+      title={detail}
+      className="text-xs font-medium text-amber-400 bg-amber-400/10 rounded-full px-2 py-0.5 shrink-0 cursor-help"
+    >
+      {label}
+    </span>
+  );
+}
+
 function SortableModelItem({
   model,
   index,
   onToggle,
   canRemove,
+  skipReason,
 }: {
   model: string;
   index: number;
   onToggle: (model: string) => void;
   canRemove: boolean;
+  skipReason?: string;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition } = useSortable({ id: model });
   const isDragging = !!transform;
@@ -52,6 +69,7 @@ function SortableModelItem({
         title={canRemove ? 'Deselect model' : 'At least one model must be selected'}
       />
       <span className="flex-1 text-sm text-p-text truncate">{model}</span>
+      {skipReason && <SkippedBadge reason={skipReason} />}
       <span className="text-xs font-medium text-p-accent bg-p-accent/10 rounded-full px-2 py-0.5 shrink-0">
         {index + 1}
       </span>
@@ -67,6 +85,7 @@ export default function Settings({ open, onClose }: SettingsProps) {
   const [preventSleep, setPreventSleep] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [cachedModels, setCachedModels] = useState<string[]>([]);
+  const [skippedModels, setSkippedModels] = useState<ReadonlyMap<string, string>>(new Map());
 
   useEffect(() => {
     if (open) {
@@ -77,6 +96,7 @@ export default function Settings({ open, onClose }: SettingsProps) {
       setAutoExportFormats(s.autoExportFormats);
       setPreventSleep(s.preventSleep);
       setCachedModels(getCachedModels());
+      setSkippedModels(new Map(getSessionSkippedModels()));
     }
   }, [open]);
 
@@ -156,7 +176,15 @@ export default function Settings({ open, onClose }: SettingsProps) {
           {/* Model Priority */}
           <div>
             <div className="flex items-center justify-between mb-1">
-              <label className="text-sm font-medium text-p-text">Model priority</label>
+              <div className="flex items-center gap-1.5">
+                <label className="text-sm font-medium text-p-text">Model priority</label>
+                <span
+                  title="Flash and Flash-lite models are fast and free-tier friendly. Pro models are slower but better with complex layouts. Preview versions are newer but may be less stable."
+                  className="text-p-text-dim hover:text-p-text cursor-help"
+                >
+                  <Info className="w-3.5 h-3.5" />
+                </span>
+              </div>
               <button
                 onClick={handleRefreshModels}
                 disabled={refreshing || !getApiKey()}
@@ -170,11 +198,6 @@ export default function Settings({ open, onClose }: SettingsProps) {
             <p className="text-xs text-p-text-dim mb-1.5">
               Models are tried in order during conversion. If one fails, the next is used. Drag to reorder.
             </p>
-            <p className="text-xs text-p-text-dim/70 mb-2">
-              <strong className="text-p-text-dim">Flash</strong> models are fast and free-tier friendly.{' '}
-              <strong className="text-p-text-dim">Pro</strong> models are slower but better with complex layouts.{' '}
-              <strong className="text-p-text-dim">Preview</strong> versions are newer but may be less stable.
-            </p>
             <div className="rounded-lg border border-p-border bg-p-bg-deep overflow-y-auto max-h-48">
               {/* Selected models — sortable */}
               <DndContext collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
@@ -186,6 +209,7 @@ export default function Settings({ open, onClose }: SettingsProps) {
                       index={i}
                       onToggle={toggleModel}
                       canRemove={modelPriority.length > 1}
+                      skipReason={skippedModels.get(model)}
                     />
                   ))}
                 </SortableContext>
@@ -211,6 +235,7 @@ export default function Settings({ open, onClose }: SettingsProps) {
                         className="shrink-0 accent-p-accent"
                       />
                       <span className="flex-1 text-sm text-p-text-muted truncate">{model}</span>
+                      {skippedModels.has(model) && <SkippedBadge reason={skippedModels.get(model)!} />}
                     </div>
                   ))}
                 </>
@@ -219,7 +244,7 @@ export default function Settings({ open, onClose }: SettingsProps) {
           </div>
 
           {/* Batch size */}
-          <div>
+          <div className="border-t border-p-border pt-4">
             <label className="block text-sm font-medium text-p-text mb-1.5">Batch size</label>
             <select
               value={batchSize}
@@ -235,7 +260,7 @@ export default function Settings({ open, onClose }: SettingsProps) {
           </div>
 
           {/* Auto-export formats */}
-          <div>
+          <div className="border-t border-p-border pt-4">
             <label className="block text-sm font-medium text-p-text mb-1">Auto-export formats</label>
             <p className="text-xs text-p-text-dim mb-2">
               Choose which file formats are saved automatically after conversion. Markdown is always stored internally for re-export.
@@ -273,7 +298,7 @@ export default function Settings({ open, onClose }: SettingsProps) {
           </div>
 
           {/* Prevent sleep */}
-          <div>
+          <div className="border-t border-p-border pt-4">
             <label className="flex items-center gap-2 px-2 py-1 rounded-lg hover:bg-p-surface-hover cursor-pointer">
               <input
                 type="checkbox"
@@ -289,7 +314,7 @@ export default function Settings({ open, onClose }: SettingsProps) {
           </div>
 
           {/* Output notes */}
-          <div>
+          <div className="border-t border-p-border pt-4">
             <label className="block text-sm font-medium text-p-text mb-1.5">Output notes</label>
             <textarea
               value={outputNotes}

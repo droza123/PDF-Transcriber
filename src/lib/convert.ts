@@ -1,6 +1,6 @@
 import type { ConversionJob, PartialProgress } from '../types';
 import { getPdfPageCount, extractPdfPageRange } from './pdfUtils';
-import { getPrimaryModel } from './settings';
+import { getPrimaryModel, addSessionSkippedModel } from './settings';
 import {
   getBatchSize,
   extractDocumentOutline,
@@ -71,6 +71,7 @@ export async function convertFile(options: ConvertFileOptions): Promise<string> 
   const skipModels = new Set<string>();
 
   const onModelSkip = (skippedModel: string, nextModel: string | null, reason: string) => {
+    addSessionSkippedModel(skippedModel, reason);
     const msg = nextModel
       ? `Skipping ${skippedModel} (${reason}), trying ${nextModel}...`
       : `Skipping ${skippedModel} (${reason}), no more models to try`;

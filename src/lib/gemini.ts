@@ -134,6 +134,7 @@ async function callGemini(
   const TRIES_PER_MODEL = 2;
   const maxAttempts = models.length * TRIES_PER_MODEL;
   const failureLog: { model: string; reason: string }[] = [];
+  const rateLimitHits = new Set<string>(); // models rate-limited at least once in this call
   let lastError: Error | null = null;
   const sizeMB = (pdfBlob.size / 1024 / 1024).toFixed(1);
   console.log(`[gemini] Uploading ${sizeMB} MB PDF via File API`);
@@ -214,9 +215,16 @@ async function callGemini(
       failureLog.push({ model, reason });
       console.warn(`[gemini] Attempt ${attempt} failed (${model}): ${reason}`);
 
-      // If persistent error, add to skipModels so future batches skip this model
+      // Decide whether to skip this model for the rest of the job.
+      // Skip on persistent errors immediately, or on repeated rate limits
+      // (e.g. daily quota exhaustion on the free tier).
+      const isRateLimit = isRateLimitError(error);
+      const repeatedRateLimit = isRateLimit && rateLimitHits.has(model);
+      if (isRateLimit) rateLimitHits.add(model);
+      const shouldSkip = isPersistentError(error) || repeatedRateLimit;
+
       const nextModelInRotation = attempt < maxAttempts ? models[Math.floor(attempt / TRIES_PER_MODEL) % models.length] : null;
-      if (isPersistentError(error) && skipModels) {
+      if (shouldSkip && skipModels) {
         skipModels.add(model);
         const nextAvailable = models.find(m => m !== model && !skipModels.has(m)) ?? null;
         onError?.(model, reason, nextAvailable ? `skipping model, trying ${nextAvailable}` : 'skipping model, no models left');
@@ -229,9 +237,9 @@ async function callGemini(
       }
 
       if (attempt < maxAttempts) {
-        const rateLimited = isRateLimitError(error);
-        const delaySec = rateLimited ? attempt * 30 : attempt * 5;
-        onRetry?.(attempt + 1, delaySec, rateLimited ? 'rate_limited' : undefined);
+        // Short delay when skipping to next model; moderate for a first rate-limit retry
+        const delaySec = shouldSkip ? 2 : isRateLimit ? 10 : attempt * 5;
+        onRetry?.(attempt + 1, delaySec, isRateLimit ? 'rate_limited' : undefined);
         console.log(`[gemini] Retrying with ${nextModelInRotation} in ${delaySec}s...`);
         await new Promise(resolve => setTimeout(resolve, delaySec * 1000));
       }
