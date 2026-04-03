@@ -92,11 +92,22 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
   // Progressive chunk loading
   const [loadedCount, setLoadedCount] = useState(INITIAL_CHUNKS);
   const sentinelRef = useRef<HTMLDivElement>(null);
+  const renderedAreaRef = useRef<HTMLDivElement>(null);
+  const [avgChunkHeight, setAvgChunkHeight] = useState(0);
 
   // Reset loaded count when document changes
   useEffect(() => {
     setLoadedCount(INITIAL_CHUNKS);
+    setAvgChunkHeight(0);
   }, [md]);
+
+  // Measure rendered chunk area to estimate total document height
+  useEffect(() => {
+    if (renderedAreaRef.current && loadedCount > 0) {
+      const h = renderedAreaRef.current.offsetHeight;
+      setAvgChunkHeight(h / loadedCount);
+    }
+  }, [loadedCount]);
 
   // IntersectionObserver to load more chunks on scroll
   useEffect(() => {
@@ -442,16 +453,23 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
               {frontmatter && (
                 <pre className="frontmatter-block">{frontmatter}</pre>
               )}
-              {chunks.slice(0, loadedCount).map((chunk, i) => (
-                <MarkdownChunk key={i} content={chunk} />
-              ))}
+              <div ref={renderedAreaRef}>
+                {chunks.slice(0, loadedCount).map((chunk, i) => (
+                  <MarkdownChunk key={i} content={chunk} />
+                ))}
+              </div>
               {loadedCount < chunks.length && (
-                <div ref={sentinelRef} className="flex items-center justify-center py-4 gap-2">
-                  <Loader2 className="w-4 h-4 text-p-accent animate-spin" />
-                  <span className="text-xs text-p-text-dim">
-                    Loading more ({loadedCount} of {chunks.length} sections)...
-                  </span>
-                </div>
+                <>
+                  <div ref={sentinelRef} className="flex items-center justify-center py-4 gap-2">
+                    <Loader2 className="w-4 h-4 text-p-accent animate-spin" />
+                    <span className="text-xs text-p-text-dim">
+                      Loading more ({loadedCount} of {chunks.length} sections)...
+                    </span>
+                  </div>
+                  {avgChunkHeight > 0 && (
+                    <div style={{ height: avgChunkHeight * (chunks.length - loadedCount) }} />
+                  )}
+                </>
               )}
             </article>
           )}
