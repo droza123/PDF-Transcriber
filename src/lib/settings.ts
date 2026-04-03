@@ -3,8 +3,7 @@ export type FileNaming = 'overwrite' | 'unique';
 
 export const DEFAULT_TRANSLATION_LANGUAGES = [
   'English', 'Spanish', 'French', 'German', 'Portuguese', 'Italian',
-  'Chinese (Simplified)', 'Chinese (Traditional)', 'Japanese', 'Korean',
-  'Arabic', 'Russian', 'Dutch', 'Polish', 'Swedish', 'Turkish', 'Hindi',
+  'Chinese (Simplified)', 'Japanese', 'Korean', 'Arabic', 'Russian',
 ];
 
 export interface AppSettings {
@@ -44,6 +43,12 @@ export function getSettings(): AppSettings {
       const oldModel: string = parsed.model;
       parsed.modelPriority = [oldModel, ...DEFAULT_MODELS.filter(m => m !== oldModel)];
       delete parsed.model;
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
+    }
+
+    // Migration: add English and trim translation languages to new defaults
+    if (parsed.translationLanguages && !parsed.translationLanguages.includes('English')) {
+      parsed.translationLanguages = [...DEFAULT_TRANSLATION_LANGUAGES];
       localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
     }
 
