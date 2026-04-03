@@ -18,6 +18,7 @@ export interface ConversionJob {
   markdown: string | null;
   error: string | null;
   exportErrors?: string;
+  translationLanguage?: string;
   startedAt: number | null;
   completedAt: number | null;
   resumeFrom?: number; // batch number to resume from (set during rehydration)

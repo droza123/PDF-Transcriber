@@ -22,9 +22,17 @@ const PRESCAN_PROMPT = `Analyze this PDF document and produce a structural outli
 
 Output ONLY the outline — no content, no commentary.`;
 
-function buildBatchPrompt(batchNum: number, totalBatches: number, outline: string): string {
+function buildBatchPrompt(batchNum: number, totalBatches: number, outline: string, translationLanguage?: string): string {
   const settings = getSettings();
-  const extra = settings.outputNotes ? `\n\nAdditional instructions:\n${settings.outputNotes}` : '';
+  const extra = settings.outputNotes ? `\n\nCustom instructions:\n${settings.outputNotes}` : '';
+
+  const translationBlock = translationLanguage
+    ? `\n\nTranslation:
+- Translate ALL document content into ${translationLanguage}.
+- The structural outline above is in the original language — use it to match heading levels, but translate the heading text into ${translationLanguage}.
+- Translate footnote and endnote text into ${translationLanguage}.
+- Keep bibliographic references (titles, authors, publishers, journal names) in their original language.`
+    : '';
 
   return `Convert this PDF to Markdown optimized for AI-assisted academic citation.
 This is batch ${batchNum} of ${totalBatches} from the source document.
@@ -39,7 +47,7 @@ Page numbering:
 - If no page numbers are visible on any page, do NOT insert page markers. Instead, ensure proper heading hierarchy so the document is navigable by section.
 
 Layout awareness:
-- Some PDFs contain scanned two-page spreads (two document pages side by side on a single PDF page). When you detect this, read LEFT page first, then RIGHT page. Do not interleave or duplicate content across the two pages. Each document page should appear exactly once in the output.
+- Some PDFs contain scanned two-page spreads (two document pages side by side on a single PDF page). When you detect this, read LEFT page first, then RIGHT page. Do not interleave or duplicate content across the two pages. Each document page should appear exactly once in the output.${translationBlock}
 
 Content rules:
 1. Use the heading hierarchy from the outline above to determine correct heading levels (# ## ### etc.). Match headings to the outline — do not guess levels independently.
@@ -47,7 +55,7 @@ Content rules:
 3. Preserve paragraph structure with blank lines between paragraphs.
 4. Convert tables to Markdown table syntax.
 5. Preserve footnotes using [^N] syntax with definitions at section end.
-6. Preserve endnotes and bibliographic references EXACTLY as written.
+6. Preserve endnotes and bibliographic references EXACTLY as written${translationLanguage ? ' (in their original language)' : ''}.
 7. Describe figures/images in [brackets], e.g. [Figure 3: Bar chart of enrollment].
 8. Fix hyphenation artifacts from PDF line-breaking.
 9. Preserve block quotes using > syntax.
@@ -278,8 +286,9 @@ export async function convertPdfBatchToMarkdown(
   onModelStart?: (model: string) => void,
   onStreamProgress?: (phase: 'uploading' | 'processing' | 'streaming', charsReceived: number) => void,
   onError?: (model: string, reason: string, action: string) => void,
+  translationLanguage?: string,
 ): Promise<GeminiResult> {
-  const prompt = buildBatchPrompt(batchNum, totalBatches, outline);
+  const prompt = buildBatchPrompt(batchNum, totalBatches, outline, translationLanguage);
   return callGemini(pdfBlob, prompt, { onRetry, abortSignal, skipModels, onModelSkip, onModelStart, onStreamProgress, onError });
 }
 

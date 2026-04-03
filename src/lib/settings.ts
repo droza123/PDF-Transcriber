@@ -1,6 +1,12 @@
 export type ExportFormat = 'md' | 'html' | 'docx' | 'docx-logos';
 export type FileNaming = 'overwrite' | 'unique';
 
+export const DEFAULT_TRANSLATION_LANGUAGES = [
+  'Spanish', 'French', 'German', 'Portuguese', 'Italian',
+  'Chinese (Simplified)', 'Chinese (Traditional)', 'Japanese', 'Korean',
+  'Arabic', 'Russian', 'Dutch', 'Polish', 'Swedish', 'Turkish', 'Hindi',
+];
+
 export interface AppSettings {
   modelPriority: string[];
   batchSize: number;
@@ -8,6 +14,9 @@ export interface AppSettings {
   autoExportFormats: ExportFormat[];
   preventSleep: boolean;
   fileNaming: FileNaming;
+  translationEnabled: boolean;
+  translationLanguage: string;
+  translationLanguages: string[];
 }
 
 const STORAGE_KEY = 'app_settings';
@@ -19,6 +28,9 @@ const DEFAULTS: AppSettings = {
   autoExportFormats: ['md'],
   preventSleep: true,
   fileNaming: 'overwrite',
+  translationEnabled: false,
+  translationLanguage: '',
+  translationLanguages: [...DEFAULT_TRANSLATION_LANGUAGES],
 };
 
 export function getSettings(): AppSettings {

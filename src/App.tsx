@@ -87,7 +87,7 @@ export default function App() {
           totalPages: entry.totalPages || 0,
           statusMessage: progress
             ? `Resumable (${progress.completedBatches}/${progress.totalBatches} batches done)`
-            : 'Queued (restored)',
+            : 'Queued',
           markdown: null,
           error: null,
           startedAt: null,
@@ -265,6 +265,7 @@ export default function App() {
           },
           resumeFrom,
           abortSignal: controller.signal,
+          translationLanguage: nextJob.translationLanguage,
         });
 
         // Clean up progress file
@@ -364,9 +365,12 @@ export default function App() {
   // F2: Duplicate detection in addFiles
   const addFiles = useCallback(
     (files: File[]) => {
+      const { translationEnabled, translationLanguage } = getSettings();
+      const transLang = translationEnabled && translationLanguage ? translationLanguage : undefined;
       const historyMap = new Map(historyRef.current.map(h => [h.sourcePath, h]));
       const newJobs = files.map(f => {
         const job = createJob(f);
+        if (transLang) job.translationLanguage = transLang;
         const prev = job.sourcePath ? historyMap.get(job.sourcePath) : null;
         if (prev) {
           job.previousConversion = { date: prev.convertedAt };

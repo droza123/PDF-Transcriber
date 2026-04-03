@@ -3,7 +3,7 @@ import { X, Save, GripVertical, RefreshCw, Info } from 'lucide-react';
 import { DndContext, closestCenter, type DragEndEvent } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { getSettings, saveSettings, DEFAULT_MODELS, getSessionSkippedModels, type ExportFormat, type FileNaming } from '../lib/settings';
+import { getSettings, saveSettings, DEFAULT_MODELS, DEFAULT_TRANSLATION_LANGUAGES, getSessionSkippedModels, type ExportFormat, type FileNaming } from '../lib/settings';
 import { getCachedModels, getApiKey, fetchAvailableModels } from '../lib/apiKey';
 
 interface SettingsProps {
@@ -84,6 +84,10 @@ export default function Settings({ open, onClose }: SettingsProps) {
   const [autoExportFormats, setAutoExportFormats] = useState<ExportFormat[]>(['md']);
   const [fileNaming, setFileNaming] = useState<FileNaming>('overwrite');
   const [preventSleep, setPreventSleep] = useState(false);
+  const [translationEnabled, setTranslationEnabled] = useState(false);
+  const [translationLanguage, setTranslationLanguage] = useState('');
+  const [translationLanguages, setTranslationLanguages] = useState<string[]>([]);
+  const [newLanguage, setNewLanguage] = useState('');
   const [refreshing, setRefreshing] = useState(false);
   const [cachedModels, setCachedModels] = useState<string[]>([]);
   const [skippedModels, setSkippedModels] = useState<ReadonlyMap<string, string>>(new Map());
@@ -97,6 +101,9 @@ export default function Settings({ open, onClose }: SettingsProps) {
       setAutoExportFormats(s.autoExportFormats);
       setFileNaming(s.fileNaming);
       setPreventSleep(s.preventSleep);
+      setTranslationEnabled(s.translationEnabled);
+      setTranslationLanguage(s.translationLanguage);
+      setTranslationLanguages(s.translationLanguages);
       setCachedModels(getCachedModels());
       setSkippedModels(new Map(getSessionSkippedModels()));
     }
@@ -151,7 +158,7 @@ export default function Settings({ open, onClose }: SettingsProps) {
   }
 
   const handleSave = () => {
-    saveSettings({ modelPriority, batchSize, outputNotes, autoExportFormats, fileNaming, preventSleep });
+    saveSettings({ modelPriority, batchSize, outputNotes, autoExportFormats, fileNaming, preventSleep, translationEnabled, translationLanguage, translationLanguages });
     onClose();
   };
 
@@ -325,16 +332,80 @@ export default function Settings({ open, onClose }: SettingsProps) {
             </p>
           </div>
 
-          {/* Output notes */}
+          {/* Custom instructions */}
           <div className="border-t border-p-border pt-4">
-            <label className="block text-sm font-medium text-p-text mb-1.5">Output notes</label>
+            <label className="block text-sm font-medium text-p-text mb-1.5">Custom instructions</label>
             <textarea
               value={outputNotes}
               onChange={(e) => setOutputNotes(e.target.value)}
-              placeholder="Additional instructions for the AI (optional)"
+              placeholder="Additional instructions appended to the AI prompt (optional)"
               rows={3}
               className="w-full rounded-lg border border-p-border bg-p-bg px-3 py-2 text-sm text-p-text placeholder:text-p-text-dim tab-transition focus:outline-none focus:border-p-accent resize-none"
             />
+          </div>
+
+          {/* Translation */}
+          <div className="border-t border-p-border pt-4">
+            <label className="block text-sm font-medium text-p-text mb-1">Translation languages</label>
+            <p className="text-xs text-p-text-dim mb-2">
+              Manage the languages available in the translation selector. Toggle translation on/off in the drop zone above the queue.
+            </p>
+            <div className="rounded-lg border border-p-border bg-p-bg-deep overflow-y-auto max-h-36">
+              {translationLanguages.map(lang => (
+                <div key={lang} className="flex items-center justify-between px-2 py-1.5 hover:bg-p-surface-hover">
+                  <span className="text-sm text-p-text">{lang}</span>
+                  <button
+                    onClick={() => setTranslationLanguages(prev => prev.filter(l => l !== lang))}
+                    className="text-xs text-p-text-dim hover:text-p-error px-1"
+                    title="Remove language"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+              ))}
+              {translationLanguages.length === 0 && (
+                <p className="text-xs text-p-text-dim px-2 py-2">No languages configured.</p>
+              )}
+            </div>
+            <div className="flex items-center gap-2 mt-2">
+              <input
+                type="text"
+                value={newLanguage}
+                onChange={e => setNewLanguage(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter' && newLanguage.trim()) {
+                    const lang = newLanguage.trim();
+                    if (!translationLanguages.includes(lang)) {
+                      setTranslationLanguages(prev => [...prev, lang]);
+                    }
+                    setNewLanguage('');
+                  }
+                }}
+                placeholder="Add a language..."
+                className="flex-1 rounded-lg border border-p-border bg-p-bg px-3 py-1.5 text-sm text-p-text placeholder:text-p-text-dim focus:outline-none focus:border-p-accent"
+              />
+              <button
+                onClick={() => {
+                  const lang = newLanguage.trim();
+                  if (lang && !translationLanguages.includes(lang)) {
+                    setTranslationLanguages(prev => [...prev, lang]);
+                  }
+                  setNewLanguage('');
+                }}
+                disabled={!newLanguage.trim()}
+                className="px-3 py-1.5 rounded-lg text-xs font-medium bg-p-accent/10 text-p-accent hover:bg-p-accent/20 disabled:opacity-30 tab-transition"
+              >
+                Add
+              </button>
+              {translationLanguages.length !== DEFAULT_TRANSLATION_LANGUAGES.length && (
+                <button
+                  onClick={() => setTranslationLanguages([...DEFAULT_TRANSLATION_LANGUAGES])}
+                  className="px-3 py-1.5 rounded-lg text-xs text-p-text-dim hover:text-p-text hover:bg-p-surface-hover tab-transition"
+                >
+                  Reset
+                </button>
+              )}
+            </div>
           </div>
         </div>
 
