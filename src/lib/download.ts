@@ -1,4 +1,3 @@
-import JSZip from 'jszip';
 import type { ConversionJob, HistoryEntry } from '../types';
 import { getSettings } from './settings';
 
@@ -228,20 +227,4 @@ export async function runAutoExport(
   }
 
   return { savedPath, errors };
-}
-
-/** Download all completed jobs as a ZIP file. */
-export async function downloadAllAsZip(jobs: ConversionJob[]): Promise<void> {
-  const doneJobs = jobs.filter(j => j.status === 'done' && j.markdown);
-  if (doneJobs.length === 0) return;
-
-  const zip = new JSZip();
-  for (const job of doneJobs) {
-    const mdName = job.fileName.replace(/\.pdf$/i, '.md');
-    zip.file(mdName, job.markdown!);
-  }
-
-  const blob = await zip.generateAsync({ type: 'blob' });
-  const date = new Date().toISOString().split('T')[0];
-  downloadBlob(blob, `converted-pdfs-${date}.zip`);
 }

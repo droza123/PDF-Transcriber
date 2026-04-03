@@ -2,7 +2,6 @@ import { Archive, Pause, Play } from 'lucide-react';
 import { DndContext, closestCenter, type DragEndEvent } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import type { ConversionJob } from '../types';
-import { downloadAllAsZip } from '../lib/download';
 import QueueItem from './QueueItem';
 
 interface QueueProps {
@@ -73,14 +72,6 @@ export default function Queue({
           >
             <Archive className="w-3 h-3" />
             Archive done ({doneCount})
-          </button>
-        )}
-        {doneCount >= 2 && (
-          <button
-            onClick={() => downloadAllAsZip(jobs)}
-            className="flex items-center gap-1 text-xs px-2 py-1 rounded bg-p-accent/10 text-p-accent hover:bg-p-accent/20 tab-transition"
-          >
-            ZIP all ({doneCount})
           </button>
         )}
       </div>
