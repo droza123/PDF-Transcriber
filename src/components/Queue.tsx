@@ -41,8 +41,9 @@ export default function Queue({
 
   if (jobs.length === 0) {
     return (
-      <div className="text-center py-8 text-p-text-dim text-sm">
-        No files in queue. Drop some PDFs above to get started.
+      <div className="text-center py-10 text-p-text-dim text-sm">
+        <p className="mb-1" style={{ fontFamily: 'var(--font-display)' }}>No files in queue</p>
+        <p className="text-xs text-p-text-dim/60">Drop some PDFs above to get started</p>
       </div>
     );
   }
@@ -54,7 +55,7 @@ export default function Queue({
       <div className="flex items-center justify-end gap-2 px-1 mb-2">
         <button
           onClick={onTogglePause}
-          className="flex items-center gap-1 text-xs px-2 py-1 rounded text-p-text-dim hover:text-p-text hover:bg-p-surface-hover tab-transition"
+          className="btn-ghost"
         >
           {paused ? (
             <>
@@ -68,7 +69,7 @@ export default function Queue({
         {doneCount > 0 && (
           <button
             onClick={onArchiveCompleted}
-            className="flex items-center gap-1 text-xs px-2 py-1 rounded text-p-text-dim hover:text-p-text hover:bg-p-surface-hover tab-transition"
+            className="btn-ghost"
           >
             <Archive className="w-3 h-3" />
             Archive done ({doneCount})

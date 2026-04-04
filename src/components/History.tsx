@@ -49,8 +49,9 @@ export default function History({
 
   if (entries.length === 0) {
     return (
-      <div className="text-center py-8 text-p-text-dim text-sm">
-        No conversion history yet. Completed conversions will appear here after archiving.
+      <div className="text-center py-10 text-p-text-dim text-sm">
+        <p className="mb-1" style={{ fontFamily: 'var(--font-display)' }}>No history yet</p>
+        <p className="text-xs text-p-text-dim/60">Completed conversions appear here after archiving</p>
       </div>
     );
   }
@@ -66,13 +67,13 @@ export default function History({
             placeholder="Search history..."
             value={searchQuery}
             onChange={e => onSearchChange(e.target.value)}
-            className="w-full pl-8 pr-3 py-1.5 text-xs rounded-md bg-p-surface border border-p-border text-p-text placeholder:text-p-text-dim focus:outline-none focus:border-p-accent tab-transition"
+            className="w-full pl-8 pr-3 py-1.5 text-xs rounded-lg bg-p-surface border border-p-border text-p-text placeholder:text-p-text-dim focus:outline-none focus:border-p-accent focus:shadow-[0_0_0_3px_var(--p-accent-glow)] tab-transition"
           />
         </div>
         {entries.length > 0 && (
           <button
             onClick={onExport}
-            className="flex items-center gap-1 text-xs px-2 py-1.5 rounded shrink-0 text-p-text-dim hover:text-p-text hover:bg-p-surface-hover tab-transition"
+            className="btn-ghost"
             title="Export history"
           >
             <Download className="w-3 h-3" />
@@ -80,10 +81,10 @@ export default function History({
         )}
         <button
           onClick={handleClearAll}
-          className={`flex items-center gap-1 text-xs px-2 py-1.5 rounded shrink-0 tab-transition ${
+          className={`btn-ghost ${
             confirmClear
-              ? 'bg-p-error/15 text-p-error font-medium'
-              : 'text-p-text-dim hover:text-p-error hover:bg-p-surface-hover'
+              ? '!bg-p-error/12 !text-p-error font-medium'
+              : ''
           }`}
           title={confirmClear ? 'Click again to confirm' : 'Clear all history'}
         >

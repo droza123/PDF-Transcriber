@@ -39,8 +39,8 @@ export default function HistoryItem({ entry, isActive, onPreview, onShowInFolder
   return (
     <div
       className={`
-        flex items-center gap-3 px-3 py-2.5 rounded-lg tab-transition
-        ${isActive ? 'bg-p-accent/10 border border-p-accent/30' : 'hover:bg-p-surface-hover'}
+        flex items-center gap-3 px-3 py-2.5 rounded-lg
+        ${isActive ? 'glow-ring bg-p-accent/8' : 'card-hover'}
       `}
     >
       <FileText className="w-4 h-4 text-p-text-dim shrink-0" />
@@ -53,7 +53,7 @@ export default function HistoryItem({ entry, isActive, onPreview, onShowInFolder
           {' \u00b7 '}
           {formatDuration(entry.durationMs)}
           {entry.translationLanguage && (
-            <span className="text-sky-400">{' \u00b7 \u2192 '}{entry.translationLanguage}</span>
+            <span className="text-p-accent">{' \u00b7 \u2192 '}{entry.translationLanguage}</span>
           )}
         </p>
 
@@ -67,7 +67,7 @@ export default function HistoryItem({ entry, isActive, onPreview, onShowInFolder
                   setShowLangPicker(false);
                   onTranslate?.(entry, lang);
                 }}
-                className="px-2 py-0.5 text-[10px] rounded-full bg-sky-400/10 text-sky-400 hover:bg-sky-400/20 tab-transition"
+                className="px-2 py-0.5 text-[10px] rounded-full bg-p-accent/10 text-p-accent hover:bg-p-accent/20 tab-transition"
               >
                 {lang}
               </button>
@@ -76,10 +76,10 @@ export default function HistoryItem({ entry, isActive, onPreview, onShowInFolder
         )}
       </div>
 
-      <div className="flex items-center gap-1 shrink-0">
+      <div className="flex items-center gap-0.5 shrink-0">
         <button
           onClick={() => onPreview(entry)}
-          className="p-1.5 rounded text-p-text-dim hover:text-p-accent hover:bg-p-surface-hover tab-transition"
+          className="p-1.5 rounded-md text-p-text-dim hover:text-p-accent hover:bg-p-surface-hover tab-transition"
           title="Preview"
         >
           <Eye className="w-3.5 h-3.5" />
@@ -88,10 +88,10 @@ export default function HistoryItem({ entry, isActive, onPreview, onShowInFolder
         {isTranscription && onTranslate && (
           <button
             onClick={() => setShowLangPicker(!showLangPicker)}
-            className={`p-1.5 rounded tab-transition ${
+            className={`p-1.5 rounded-md tab-transition ${
               showLangPicker
-                ? 'text-sky-400 bg-sky-400/10'
-                : 'text-p-text-dim hover:text-sky-400 hover:bg-p-surface-hover'
+                ? 'text-p-accent bg-p-accent/10'
+                : 'text-p-text-dim hover:text-p-accent hover:bg-p-surface-hover'
             }`}
             title="Translate from this transcription"
           >
@@ -100,21 +100,21 @@ export default function HistoryItem({ entry, isActive, onPreview, onShowInFolder
         )}
         <button
           onClick={() => onReconvert(entry)}
-          className="p-1.5 rounded text-p-text-dim hover:text-p-accent hover:bg-p-surface-hover tab-transition"
+          className="p-1.5 rounded-md text-p-text-dim hover:text-p-accent hover:bg-p-surface-hover tab-transition"
           title="Re-convert"
         >
           <RefreshCw className="w-3.5 h-3.5" />
         </button>
         <button
           onClick={() => onShowInFolder(entry)}
-          className="p-1.5 rounded text-p-text-dim hover:text-p-success hover:bg-p-surface-hover tab-transition"
+          className="p-1.5 rounded-md text-p-text-dim hover:text-p-success hover:bg-p-surface-hover tab-transition"
           title="Show in folder"
         >
           <FolderOpen className="w-3.5 h-3.5" />
         </button>
         <button
           onClick={() => onDelete(entry.id)}
-          className="p-1.5 rounded text-p-text-dim hover:text-p-error hover:bg-p-surface-hover tab-transition"
+          className="p-1.5 rounded-md text-p-text-dim hover:text-p-error hover:bg-p-surface-hover tab-transition"
           title="Remove from history"
         >
           <Trash2 className="w-3.5 h-3.5" />

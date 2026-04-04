@@ -32,6 +32,7 @@ export default function App() {
   const [historyMarkdown, setHistoryMarkdown] = useState<string | null>(null);
   const [historySearch, setHistorySearch] = useState('');
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsInitialProvider, setSettingsInitialProvider] = useState<'gemini' | 'openrouter' | 'anthropic' | null>(null);
   const [paused, setPaused] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(() =>
@@ -842,7 +843,7 @@ export default function App() {
   const showHistoryPreview = previewSource === 'history' && previewHistoryEntry && historyMarkdown;
 
   return (
-    <div className="flex flex-col h-screen bg-p-bg">
+    <div className="flex flex-col h-screen bg-p-bg noise-bg">
       <Header
         theme={theme}
         keyPresent={keyPresent}
@@ -863,33 +864,27 @@ export default function App() {
               </div>
 
               {/* Tab bar */}
-              <div className="flex items-center gap-1 px-4 pb-2 shrink-0">
+              <div className="flex items-center gap-4 px-4 pb-1 border-b border-p-border-subtle shrink-0">
                 <button
                   onClick={() => setSidebarTab('queue')}
-                  className={`px-3 py-1.5 text-xs rounded-md tab-transition ${
-                    sidebarTab === 'queue'
-                      ? 'bg-p-accent/15 text-p-accent font-medium'
-                      : 'text-p-text-dim hover:text-p-text hover:bg-p-surface-hover'
+                  className={`tab-underline text-xs tab-transition ${
+                    sidebarTab === 'queue' ? 'tab-underline-active' : 'text-p-text-dim hover:text-p-text'
                   }`}
                 >
                   Queue{jobs.length > 0 ? ` (${jobs.length})` : ''}
                 </button>
                 <button
                   onClick={() => setSidebarTab('history')}
-                  className={`px-3 py-1.5 text-xs rounded-md tab-transition ${
-                    sidebarTab === 'history'
-                      ? 'bg-p-accent/15 text-p-accent font-medium'
-                      : 'text-p-text-dim hover:text-p-text hover:bg-p-surface-hover'
+                  className={`tab-underline text-xs tab-transition ${
+                    sidebarTab === 'history' ? 'tab-underline-active' : 'text-p-text-dim hover:text-p-text'
                   }`}
                 >
                   History{history.length > 0 ? ` (${history.length})` : ''}
                 </button>
                 <button
                   onClick={() => setSidebarTab('log')}
-                  className={`px-3 py-1.5 text-xs rounded-md tab-transition ${
-                    sidebarTab === 'log'
-                      ? 'bg-p-accent/15 text-p-accent font-medium'
-                      : 'text-p-text-dim hover:text-p-text hover:bg-p-surface-hover'
+                  className={`tab-underline text-xs tab-transition ${
+                    sidebarTab === 'log' ? 'tab-underline-active' : 'text-p-text-dim hover:text-p-text'
                   }`}
                 >
                   Log{logEntries.length > 0 ? ` (${logEntries.length})` : ''}
@@ -897,7 +892,7 @@ export default function App() {
               </div>
 
               {/* Tab content */}
-              <div className="flex-1 px-4 pb-4 overflow-auto">
+              <div className="flex-1 px-4 pt-3 pb-4 overflow-auto">
                 {sidebarTab === 'queue' ? (
                   <Queue
                     jobs={jobs}
@@ -938,8 +933,8 @@ export default function App() {
 
         {/* Drag handle / separator */}
         <div
-          className={`hidden lg:flex items-center justify-center border-l border-r border-p-border hover:bg-p-accent/10 tab-transition ${
-            sidebarCollapsed ? 'w-6 cursor-pointer' : 'w-1.5 cursor-col-resize'
+          className={`hidden lg:flex items-center justify-center separator-handle ${
+            sidebarCollapsed ? 'w-6 cursor-pointer bg-p-surface/50' : 'w-2 cursor-col-resize'
           }`}
           onMouseDown={sidebarCollapsed ? undefined : handleDragStart}
           onDoubleClick={handleSeparatorDoubleClick}
@@ -952,9 +947,15 @@ export default function App() {
         </div>
 
         {/* Right panel: preview */}
-        <div className="hidden lg:flex flex-1 flex-col bg-p-bg-deep min-w-0">
+        <div className="hidden lg:flex flex-1 flex-col paper-bg min-w-0">
           {!keyPresent ? (
-            <Welcome onOpenSettings={() => setSettingsOpen(true)} />
+            <Welcome
+              onOpenSettings={() => setSettingsOpen(true)}
+              onSelectProvider={(provider) => {
+                setSettingsInitialProvider(provider);
+                setSettingsOpen(true);
+              }}
+            />
           ) : showQueuePreview ? (
             <Preview job={previewJob} />
           ) : showHistoryPreview ? (
@@ -965,17 +966,25 @@ export default function App() {
               sourcePath={previewHistoryEntry!.sourcePath}
             />
           ) : (
-            <div className="flex-1 flex items-center justify-center text-p-text-dim text-sm">
-              {jobs.some(j => j.status === 'done') || history.length > 0
-                ? 'Select an item to preview'
-                : 'Converted markdown will appear here'}
+            <div className="flex-1 flex items-center justify-center text-p-text-dim text-sm relative z-10">
+              <div className="text-center">
+                <p style={{ fontFamily: 'var(--font-display)' }}>
+                  {jobs.some(j => j.status === 'done') || history.length > 0
+                    ? 'Select an item to preview'
+                    : 'Converted markdown will appear here'}
+                </p>
+              </div>
             </div>
           )}
         </div>
       </div>
 
       {/* Settings modal */}
-      <Settings open={settingsOpen} onClose={() => { setSettingsOpen(false); setKeyPresent(hasApiKey()); }} />
+      <Settings
+        open={settingsOpen}
+        onClose={() => { setSettingsOpen(false); setSettingsInitialProvider(null); setKeyPresent(hasApiKey()); }}
+        initialProvider={settingsInitialProvider}
+      />
     </div>
   );
 }

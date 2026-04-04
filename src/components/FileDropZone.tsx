@@ -58,13 +58,9 @@ export default function FileDropZone({ onFilesAdded, disabled }: FileDropZonePro
         onDragOver={handleDragOver}
         onDragLeave={() => setDragOver(false)}
         className={`
-          relative flex flex-col items-center justify-center gap-3 p-8
-          border-2 border-dashed rounded-xl cursor-pointer tab-transition
-          ${dragOver
-            ? 'border-p-accent bg-p-accent/5'
-            : 'border-p-border hover:border-p-text-dim hover:bg-p-surface/50'
-          }
-          ${disabled ? 'opacity-50 pointer-events-none' : ''}
+          relative flex flex-col items-center justify-center gap-3 p-7 rounded-xl cursor-pointer
+          ${dragOver ? 'dropzone-active' : 'dropzone-idle'}
+          ${disabled ? 'opacity-40 pointer-events-none' : ''}
         `}
         onClick={() => inputRef.current?.click()}
       >
@@ -77,22 +73,21 @@ export default function FileDropZone({ onFilesAdded, disabled }: FileDropZonePro
           onChange={e => { handleFiles(e.target.files); e.target.value = ''; }}
         />
         {dragOver ? (
-          <FileUp className="w-10 h-10 text-p-accent" />
+          <FileUp className="w-9 h-9 text-p-accent" />
         ) : (
-          <Upload className="w-10 h-10 text-p-text-dim" />
+          <Upload className="w-9 h-9 text-p-text-dim" />
         )}
         <div className="text-center">
           <p className="text-sm font-medium text-p-text">
-            Drop PDFs here or click to browse
+            Drop PDFs here
           </p>
-          <p className="text-xs text-p-text-dim mt-1">
-            Select one or more PDF files for batch conversion
+          <p className="text-xs text-p-text-dim mt-0.5">
+            or click to browse
           </p>
         </div>
       </div>
 
       {/* Translation selector */}
-      {/* Mode toggle: Transcribe / Translate */}
       {languages.length > 0 && (
         <div
           className="flex items-center gap-2 px-3 py-1.5 text-xs"
@@ -101,7 +96,7 @@ export default function FileDropZone({ onFilesAdded, disabled }: FileDropZonePro
           <div className="inline-flex rounded-full border border-p-border bg-p-bg-deep p-0.5">
             <button
               onClick={() => { setTransEnabled(false); saveSettings({ translationEnabled: false }); }}
-              className={`px-3 py-1 rounded-full tab-transition ${
+              className={`px-3 py-1 rounded-full tab-transition text-xs ${
                 !transEnabled
                   ? 'bg-p-accent text-white font-medium'
                   : 'text-p-text-dim hover:text-p-text'
@@ -111,9 +106,9 @@ export default function FileDropZone({ onFilesAdded, disabled }: FileDropZonePro
             </button>
             <button
               onClick={() => { setTransEnabled(true); saveSettings({ translationEnabled: true }); }}
-              className={`px-3 py-1 rounded-full tab-transition ${
+              className={`px-3 py-1 rounded-full tab-transition text-xs ${
                 transEnabled
-                  ? 'bg-sky-500 text-white font-medium'
+                  ? 'bg-p-accent text-white font-medium'
                   : 'text-p-text-dim hover:text-p-text'
               }`}
             >

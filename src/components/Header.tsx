@@ -1,4 +1,4 @@
-import { Sun, Moon, FileText, Settings2 } from 'lucide-react';
+import { Sun, Moon, Settings2 } from 'lucide-react';
 import { hasApiKey, getApiKey } from '../lib/apiKey';
 import { getSettings } from '../lib/settings';
 import { getAllProviders } from '../lib/providers/registry';
@@ -18,43 +18,50 @@ export default function Header({ theme, keyPresent, onToggleTheme, onOpenSetting
   const maskedKey = key ? '\u2022\u2022\u2022\u2022' + key.slice(-4) : null;
 
   return (
-    <header className="flex items-center justify-between px-6 py-3 border-b border-p-border">
-      <div className="flex items-center gap-3">
-        <FileText className="w-6 h-6 text-p-accent" />
+    <header className="flex items-center justify-between px-6 py-3.5 border-b border-p-border bg-p-bg/80 backdrop-blur-sm relative z-10">
+      <div className="flex items-center gap-3.5">
+        <div className="w-8 h-8 rounded-lg bg-p-accent/15 flex items-center justify-center">
+          <span className="text-p-accent font-bold text-sm" style={{ fontFamily: 'var(--font-display)' }}>P</span>
+        </div>
         <div>
-          <h1 className="text-lg font-semibold text-p-text">PDF Transcriber</h1>
-          <p className="text-xs text-p-text-muted">AI-powered batch conversion to Markdown, Word, and HTML <span className="text-p-text-dim">v{__APP_VERSION__}</span></p>
+          <h1 className="text-[17px] font-semibold text-p-text tracking-tight" style={{ fontFamily: 'var(--font-display)' }}>
+            PDF Transcriber
+          </h1>
+          <p className="text-[11px] text-p-text-dim">
+            v{__APP_VERSION__}
+          </p>
         </div>
       </div>
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1.5">
         {/* Provider status */}
         {keyPresent && activeProvider ? (
           <button
             onClick={onOpenSettings}
-            className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs border border-p-border bg-p-surface hover:border-p-accent/50 tab-transition"
+            className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs border border-p-border hover:border-p-accent/40 bg-p-surface/50 tab-transition group"
             title="Change provider settings"
           >
-            <span className="text-p-text font-medium">{activeProvider.displayName}</span>
-            {maskedKey && <span className="font-mono text-p-text-dim">{maskedKey}</span>}
+            <span className="w-1.5 h-1.5 rounded-full bg-p-success shrink-0" />
+            <span className="text-p-text-muted group-hover:text-p-text font-medium tab-transition">{activeProvider.displayName}</span>
+            {maskedKey && <span className="font-mono text-p-text-dim text-[11px]">{maskedKey}</span>}
           </button>
         ) : (
           <button
             onClick={onOpenSettings}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-p-accent text-white hover:bg-p-accent-bright tab-transition"
+            className="btn-primary text-xs py-1.5"
           >
             Set up API
           </button>
         )}
         <button
           onClick={onOpenSettings}
-          className="p-2 rounded-lg text-p-text-muted hover:text-p-text hover:bg-p-surface-hover tab-transition"
+          className="p-2 rounded-lg text-p-text-dim hover:text-p-accent hover:bg-p-surface-hover tab-transition"
           title="Settings"
         >
           <Settings2 className="w-4 h-4" />
         </button>
         <button
           onClick={onToggleTheme}
-          className="p-2 rounded-lg text-p-text-muted hover:text-p-text hover:bg-p-surface-hover tab-transition"
+          className="p-2 rounded-lg text-p-text-dim hover:text-p-accent hover:bg-p-surface-hover tab-transition"
           title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
         >
           {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}

@@ -17,10 +17,10 @@ const LEVEL_ICON: Record<LogEntry['level'], typeof Info> = {
 };
 
 const LEVEL_COLOR: Record<LogEntry['level'], string> = {
-  info: 'text-blue-400',
-  warn: 'text-yellow-400',
+  info: 'text-p-accent',
+  warn: 'text-p-warning',
   error: 'text-p-error',
-  success: 'text-green-400',
+  success: 'text-p-success',
 };
 
 function formatTime(ts: number): string {
@@ -72,19 +72,15 @@ export default function Log({ entries, onClear }: LogProps) {
   }, [filtered]);
 
   // Auto-collapse: only the latest group is expanded by default
-  // User toggles override this
   const latestJobId = groups.length > 0 ? groups[0].jobId : null;
 
-  // Track explicit user toggles: 'expanded' or 'collapsed'
   function toggleGroup(jobId: string) {
     setCollapsedJobs(prev => {
       const next = new Set(prev);
-      // If currently expanded (either explicitly toggled open, or latest by default), collapse it
       if (isExpanded(jobId)) {
         next.add(jobId);
         next.delete('_open_' + jobId);
       } else {
-        // Currently collapsed — expand it
         next.delete(jobId);
         next.add('_open_' + jobId);
       }
@@ -95,7 +91,6 @@ export default function Log({ entries, onClear }: LogProps) {
   function isExpanded(jobId: string): boolean {
     if (collapsedJobs.has(jobId)) return false;
     if (collapsedJobs.has('_open_' + jobId)) return true;
-    // Default: only the latest group is expanded
     return jobId === latestJobId;
   }
 
@@ -112,8 +107,9 @@ export default function Log({ entries, onClear }: LogProps) {
 
   if (entries.length === 0) {
     return (
-      <div className="text-center py-8 text-p-text-dim text-sm">
-        No log entries yet. Events will appear here during conversion.
+      <div className="text-center py-10 text-p-text-dim text-sm">
+        <p className="mb-1" style={{ fontFamily: 'var(--font-display)' }}>No log entries</p>
+        <p className="text-xs text-p-text-dim/60">Events will appear here during conversion</p>
       </div>
     );
   }
@@ -136,15 +132,15 @@ export default function Log({ entries, onClear }: LogProps) {
             placeholder="Search log..."
             value={search}
             onChange={e => setSearch(e.target.value)}
-            className="w-full pl-8 pr-3 py-1.5 text-xs rounded-md bg-p-surface border border-p-border text-p-text placeholder:text-p-text-dim focus:outline-none focus:border-p-accent tab-transition"
+            className="w-full pl-8 pr-3 py-1.5 text-xs rounded-lg bg-p-surface border border-p-border text-p-text placeholder:text-p-text-dim focus:outline-none focus:border-p-accent focus:shadow-[0_0_0_3px_var(--p-accent-glow)] tab-transition"
           />
         </div>
         <button
           onClick={handleClear}
-          className={`flex items-center gap-1 text-xs px-2 py-1.5 rounded shrink-0 tab-transition ${
+          className={`btn-ghost ${
             confirmClear
-              ? 'bg-p-error/15 text-p-error font-medium'
-              : 'text-p-text-dim hover:text-p-error hover:bg-p-surface-hover'
+              ? '!bg-p-error/12 !text-p-error font-medium'
+              : ''
           }`}
           title={confirmClear ? 'Click again to confirm' : 'Clear log'}
         >
@@ -159,9 +155,9 @@ export default function Log({ entries, onClear }: LogProps) {
           <button
             key={key}
             onClick={() => setLevelFilter(key)}
-            className={`text-[11px] px-2 py-1 rounded-md tab-transition ${
+            className={`text-[11px] px-2.5 py-1 rounded-md tab-transition ${
               levelFilter === key
-                ? 'bg-p-accent/15 text-p-accent font-medium'
+                ? 'bg-p-accent/12 text-p-accent font-medium'
                 : 'text-p-text-dim hover:text-p-text hover:bg-p-surface-hover'
             }`}
           >
@@ -185,7 +181,7 @@ export default function Log({ entries, onClear }: LogProps) {
                 {/* Group header */}
                 <button
                   onClick={() => toggleGroup(group.jobId)}
-                  className="flex items-center gap-1.5 w-full px-2 py-1.5 text-left hover:bg-p-surface-hover tab-transition"
+                  className="flex items-center gap-1.5 w-full px-2.5 py-2 text-left hover:bg-p-surface-hover tab-transition"
                 >
                   {expanded
                     ? <ChevronDown className="w-3 h-3 text-p-text-dim shrink-0" />
@@ -193,7 +189,7 @@ export default function Log({ entries, onClear }: LogProps) {
                   }
                   <span className="text-xs font-medium text-p-text truncate flex-1" title={group.fileName}>{group.fileName}</span>
                   {errorCount > 0 && (
-                    <span className="text-[10px] font-medium text-p-error bg-p-error/10 rounded-full px-1.5 py-0.5 shrink-0">
+                    <span className="badge badge-error shrink-0">
                       {errorCount}
                     </span>
                   )}
@@ -209,7 +205,7 @@ export default function Log({ entries, onClear }: LogProps) {
                       const Icon = LEVEL_ICON[entry.level];
                       const color = LEVEL_COLOR[entry.level];
                       return (
-                        <div key={entry.id} className="flex items-start gap-2 px-2 py-1 hover:bg-p-surface-hover">
+                        <div key={entry.id} className="flex items-start gap-2 px-2.5 py-1.5 hover:bg-p-surface-hover">
                           <Icon className={`w-3 h-3 shrink-0 mt-0.5 ${color}`} />
                           <div className="flex-1 min-w-0">
                             <p className="text-[11px] text-p-text truncate" title={entry.message}>{entry.message}</p>

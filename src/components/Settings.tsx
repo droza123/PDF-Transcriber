@@ -12,6 +12,8 @@ import { OpenRouterProvider } from '../lib/providers/openrouter';
 interface SettingsProps {
   open: boolean;
   onClose: () => void;
+  /** If set, override the initially-selected provider tab when the modal opens. */
+  initialProvider?: ProviderId | null;
 }
 
 /** Returns a React element showing pricing info for a model, or null. */
@@ -20,7 +22,7 @@ function getPricingBadge(modelId: string, modelData: ProviderModel[]): React.Rea
   if (!data) return null;
   if (data.isFree) {
     return (
-      <span className="text-[10px] font-medium text-green-400 bg-green-400/10 rounded-full px-1.5 py-0.5 shrink-0">
+      <span className="badge badge-free shrink-0">
         Free
       </span>
     );
@@ -30,7 +32,7 @@ function getPricingBadge(modelId: string, modelData: ProviderModel[]): React.Rea
       ? `$${data.pricePerMTokens.toFixed(2)}/M`
       : `$${data.pricePerMTokens.toFixed(0)}/M`;
     return (
-      <span className="text-[10px] font-medium text-p-text-dim bg-p-surface-hover rounded-full px-1.5 py-0.5 shrink-0">
+      <span className="badge text-p-text-dim bg-p-surface-hover shrink-0">
         {price}
       </span>
     );
@@ -46,7 +48,7 @@ function SkippedBadge({ reason }: { reason: string }) {
   return (
     <span
       title={detail}
-      className="text-xs font-medium text-amber-400 bg-amber-400/10 rounded-full px-2 py-0.5 shrink-0 cursor-help"
+      className="badge badge-warning shrink-0 cursor-help"
     >
       {label}
     </span>
@@ -100,14 +102,14 @@ function SortableModelItem({
       <span className="flex-1 text-sm text-p-text truncate">{model}</span>
       {pricingBadge}
       {skipReason && <SkippedBadge reason={skipReason} />}
-      <span className="text-xs font-medium text-p-accent bg-p-accent/10 rounded-full px-2 py-0.5 shrink-0">
+      <span className="badge badge-accent shrink-0">
         {index + 1}
       </span>
     </div>
   );
 }
 
-export default function Settings({ open, onClose }: SettingsProps) {
+export default function Settings({ open, onClose, initialProvider }: SettingsProps) {
   const [selectedProvider, setSelectedProvider] = useState<ProviderId>('gemini');
   const [modelPriority, setModelPriority] = useState<string[]>([]);
   const [batchSize, setBatchSize] = useState(10);
@@ -138,7 +140,7 @@ export default function Settings({ open, onClose }: SettingsProps) {
   useEffect(() => {
     if (open) {
       const s = getSettings();
-      const provider = s.activeProvider;
+      const provider = initialProvider || s.activeProvider;
       setSelectedProvider(provider);
       setModelPriority(s.providerModelPriority[provider] || []);
       setBatchSize(s.batchSize);
@@ -311,18 +313,18 @@ export default function Settings({ open, onClose }: SettingsProps) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 modal-backdrop"
       onClick={onClose}
     >
       <div
-        className="w-full max-w-lg max-h-[90vh] rounded-xl bg-p-bg border border-p-border shadow-lg p-6 overflow-y-auto"
+        className="w-full max-w-lg max-h-[90vh] rounded-xl bg-p-bg border border-p-border shadow-2xl p-6 overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-5">
-          <h2 className="text-lg font-semibold text-p-text">Settings</h2>
+          <h2 className="text-lg font-semibold text-p-text" style={{ fontFamily: 'var(--font-display)' }}>Settings</h2>
           <button
             onClick={onClose}
-            className="p-1.5 rounded-lg text-p-text-muted hover:text-p-text hover:bg-p-surface-hover tab-transition"
+            className="p-1.5 rounded-lg text-p-text-dim hover:text-p-accent hover:bg-p-surface-hover tab-transition"
           >
             <X className="w-4 h-4" />
           </button>
@@ -331,7 +333,7 @@ export default function Settings({ open, onClose }: SettingsProps) {
         <div className="space-y-4">
           {/* Provider & API Key */}
           <div>
-            <label className="block text-sm font-medium text-p-text mb-1">Provider</label>
+            <label className="section-label block mb-1">Provider</label>
             <p className="text-xs text-p-text-dim mb-2">
               Free options are usually more than good enough for most documents.
             </p>
@@ -343,10 +345,10 @@ export default function Settings({ open, onClose }: SettingsProps) {
                   <button
                     key={p.id}
                     onClick={() => handleProviderChange(p.id)}
-                    className={`flex-1 px-3 py-2 text-xs rounded-lg border tab-transition ${
+                    className={`flex-1 px-3 py-2.5 text-xs rounded-lg border tab-transition ${
                       isSelected
-                        ? 'border-p-accent bg-p-accent/10 text-p-accent font-medium'
-                        : 'border-p-border bg-p-bg text-p-text-muted hover:text-p-text hover:border-p-accent/50'
+                        ? 'border-p-accent bg-p-accent/8 text-p-accent font-medium shadow-[0_0_0_1px_var(--p-accent-glow)]'
+                        : 'border-p-border bg-p-bg text-p-text-muted hover:text-p-text hover:border-p-accent/40'
                     }`}
                   >
                     {p.displayName}
@@ -389,7 +391,7 @@ export default function Settings({ open, onClose }: SettingsProps) {
                           onChange={e => { setKeyValue(e.target.value); setValidationResult(null); }}
                           onKeyDown={e => e.key === 'Enter' && !validating && handleKeySave()}
                           placeholder={provider?.keyPlaceholder ?? 'Paste your API key'}
-                          className="w-full px-3 py-2 pr-8 text-sm font-mono rounded-lg bg-p-bg border border-p-border text-p-text placeholder:text-p-text-dim focus:outline-none focus:border-p-accent"
+                          className="w-full px-3 py-2 pr-8 text-sm font-mono rounded-lg bg-p-bg border border-p-border text-p-text placeholder:text-p-text-dim focus:outline-none focus:border-p-accent focus:shadow-[0_0_0_3px_var(--p-accent-glow)]"
                           autoFocus
                           disabled={validating}
                         />
@@ -456,7 +458,7 @@ export default function Settings({ open, onClose }: SettingsProps) {
                 <div className="space-y-2">
                   <button
                     onClick={() => setEditingKey(true)}
-                    className="text-sm px-3 py-1.5 rounded-lg bg-p-accent text-white hover:bg-p-accent-bright tab-transition"
+                    className="btn-primary text-sm py-1.5"
                   >
                     Enter API Key
                   </button>
@@ -491,10 +493,10 @@ export default function Settings({ open, onClose }: SettingsProps) {
           </div>
 
           {/* Model Priority */}
-          <div className="border-t border-p-border pt-4">
+          <div className="section-divider">
             <div className="flex items-center justify-between mb-1">
               <div className="flex items-center gap-1.5">
-                <label className="text-sm font-medium text-p-text">Model priority</label>
+                <label className="section-label">Model priority</label>
                 <span
                   title="Models are tried in order during conversion. If one fails, the next is used."
                   className="text-p-text-dim hover:text-p-text cursor-help"
@@ -602,12 +604,12 @@ export default function Settings({ open, onClose }: SettingsProps) {
           </div>
 
           {/* Batch size */}
-          <div className="border-t border-p-border pt-4">
-            <label className="block text-sm font-medium text-p-text mb-1.5">Batch size</label>
+          <div className="section-divider">
+            <label className="section-label block mb-1.5">Batch size</label>
             <select
               value={batchSize}
               onChange={(e) => setBatchSize(Number(e.target.value))}
-              className="w-full rounded-lg border border-p-border bg-p-bg px-3 py-2 text-sm text-p-text tab-transition focus:outline-none focus:border-p-accent"
+              className="input-base"
             >
               {[1, 2, 3, 5, 10, 15, 20].map((n) => (
                 <option key={n} value={n}>
@@ -618,8 +620,8 @@ export default function Settings({ open, onClose }: SettingsProps) {
           </div>
 
           {/* Auto-export formats */}
-          <div className="border-t border-p-border pt-4">
-            <label className="block text-sm font-medium text-p-text mb-1">Auto-export formats</label>
+          <div className="section-divider">
+            <label className="section-label block mb-1">Auto-export formats</label>
             <p className="text-xs text-p-text-dim mb-2">
               Choose which file formats are saved automatically after conversion. Markdown is always stored internally for re-export.
             </p>
@@ -654,11 +656,11 @@ export default function Settings({ open, onClose }: SettingsProps) {
               })}
             </div>
 
-            <label className="block text-sm font-medium text-p-text mt-3 mb-1.5">If file already exists</label>
+            <label className="section-label block mt-3 mb-1.5">If file already exists</label>
             <select
               value={fileNaming}
               onChange={(e) => setFileNaming(e.target.value as FileNaming)}
-              className="w-full rounded-lg border border-p-border bg-p-bg px-3 py-2 text-sm text-p-text tab-transition focus:outline-none focus:border-p-accent"
+              className="input-base"
             >
               <option value="overwrite">Overwrite existing file</option>
               <option value="unique">Create new file with number suffix</option>
@@ -666,7 +668,7 @@ export default function Settings({ open, onClose }: SettingsProps) {
           </div>
 
           {/* Translation export option */}
-          <div className="border-t border-p-border pt-4">
+          <div className="section-divider">
             <label className="flex items-center gap-2 px-2 py-1 rounded-lg hover:bg-p-surface-hover cursor-pointer">
               <input
                 type="checkbox"
@@ -682,7 +684,7 @@ export default function Settings({ open, onClose }: SettingsProps) {
           </div>
 
           {/* Prevent sleep */}
-          <div className="border-t border-p-border pt-4">
+          <div className="section-divider">
             <label className="flex items-center gap-2 px-2 py-1 rounded-lg hover:bg-p-surface-hover cursor-pointer">
               <input
                 type="checkbox"
@@ -690,7 +692,7 @@ export default function Settings({ open, onClose }: SettingsProps) {
                 onChange={(e) => setPreventSleep(e.target.checked)}
                 className="shrink-0 accent-p-accent"
               />
-              <span className="text-sm font-medium text-p-text">Prevent sleep during conversion</span>
+              <span className="text-sm text-p-text">Prevent sleep during conversion</span>
             </label>
             <p className="text-xs text-p-text-dim mt-1 px-2">
               Keeps your computer awake while transcriptions are running. Useful for long jobs when you'll be away. The display will also stay on.
@@ -698,20 +700,20 @@ export default function Settings({ open, onClose }: SettingsProps) {
           </div>
 
           {/* Custom instructions */}
-          <div className="border-t border-p-border pt-4">
-            <label className="block text-sm font-medium text-p-text mb-1.5">Custom instructions</label>
+          <div className="section-divider">
+            <label className="section-label block mb-1.5">Custom instructions</label>
             <textarea
               value={outputNotes}
               onChange={(e) => setOutputNotes(e.target.value)}
               placeholder="Additional instructions appended to the AI prompt (optional)"
               rows={3}
-              className="w-full rounded-lg border border-p-border bg-p-bg px-3 py-2 text-sm text-p-text placeholder:text-p-text-dim tab-transition focus:outline-none focus:border-p-accent resize-none"
+              className="input-base resize-none"
             />
           </div>
 
           {/* Translation */}
-          <div className="border-t border-p-border pt-4">
-            <label className="block text-sm font-medium text-p-text mb-1">Translation languages</label>
+          <div className="section-divider">
+            <label className="section-label block mb-1">Translation languages</label>
             <p className="text-xs text-p-text-dim mb-2">
               Manage the languages available in the translation selector. Toggle translation on/off in the drop zone above the queue.
             </p>
@@ -747,7 +749,7 @@ export default function Settings({ open, onClose }: SettingsProps) {
                   }
                 }}
                 placeholder="Add a language..."
-                className="flex-1 rounded-lg border border-p-border bg-p-bg px-3 py-1.5 text-sm text-p-text placeholder:text-p-text-dim focus:outline-none focus:border-p-accent"
+                className="flex-1 input-base py-1.5"
               />
               <button
                 onClick={() => {
@@ -758,7 +760,7 @@ export default function Settings({ open, onClose }: SettingsProps) {
                   setNewLanguage('');
                 }}
                 disabled={!newLanguage.trim()}
-                className="px-3 py-1.5 rounded-lg text-xs font-medium bg-p-accent/10 text-p-accent hover:bg-p-accent/20 disabled:opacity-30 tab-transition"
+                className="px-3 py-1.5 rounded-lg text-xs font-medium bg-p-accent/12 text-p-accent hover:bg-p-accent/20 disabled:opacity-30 tab-transition"
               >
                 Add
               </button>
@@ -783,7 +785,7 @@ export default function Settings({ open, onClose }: SettingsProps) {
           </button>
           <button
             onClick={handleSave}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-p-accent text-white hover:opacity-90 tab-transition"
+            className="btn-primary"
           >
             <Save className="w-4 h-4" />
             Save

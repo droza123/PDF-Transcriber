@@ -206,7 +206,7 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
       const mark = document.createElement('mark');
       mark.setAttribute('data-find', 'true');
       const docOrderIndex = i;
-      mark.style.background = docOrderIndex === findActiveIndex ? '#f59e0b' : '#fde68a';
+      mark.style.background = docOrderIndex === findActiveIndex ? '#d4a853' : '#f5deb3';
       mark.style.color = '#000';
       mark.style.borderRadius = '2px';
       range.surroundContents(mark);
@@ -276,24 +276,20 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
   return (
     <div className="flex flex-col h-full">
       {/* Toolbar */}
-      <div className="flex items-center justify-between px-4 py-2 border-b border-p-border shrink-0">
-        <div className="flex items-center gap-1">
+      <div className="flex items-center justify-between px-4 py-2 border-b border-p-border shrink-0 relative z-10">
+        <div className="flex items-center gap-3">
           <button
             onClick={() => setTab('rendered')}
-            className={`px-3 py-1 text-xs rounded-md tab-transition ${
-              tab === 'rendered'
-                ? 'bg-p-accent/15 text-p-accent font-medium'
-                : 'text-p-text-dim hover:text-p-text hover:bg-p-surface-hover'
+            className={`tab-underline text-xs tab-transition ${
+              tab === 'rendered' ? 'tab-underline-active' : 'text-p-text-dim hover:text-p-text'
             }`}
           >
             Rendered
           </button>
           <button
             onClick={() => setTab('raw')}
-            className={`px-3 py-1 text-xs rounded-md tab-transition ${
-              tab === 'raw'
-                ? 'bg-p-accent/15 text-p-accent font-medium'
-                : 'text-p-text-dim hover:text-p-text hover:bg-p-surface-hover'
+            className={`tab-underline text-xs tab-transition ${
+              tab === 'raw' ? 'tab-underline-active' : 'text-p-text-dim hover:text-p-text'
             }`}
           >
             Raw Markdown
@@ -301,10 +297,8 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
           {resolvedSourcePath && (
             <button
               onClick={() => setSideBySide(!sideBySide)}
-              className={`px-3 py-1 text-xs rounded-md tab-transition ${
-                sideBySide
-                  ? 'bg-p-accent/15 text-p-accent font-medium'
-                  : 'text-p-text-dim hover:text-p-text hover:bg-p-surface-hover'
+              className={`tab-underline text-xs tab-transition ${
+                sideBySide ? 'tab-underline-active' : 'text-p-text-dim hover:text-p-text'
               }`}
               title="Side-by-side with PDF"
             >
@@ -312,17 +306,17 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
             </button>
           )}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
           <button
             onClick={() => { setFindOpen(true); setTimeout(() => findInputRef.current?.focus(), 50); }}
-            className="flex items-center gap-1 text-xs px-2 py-1 rounded text-p-text-dim hover:text-p-text hover:bg-p-surface-hover tab-transition"
+            className="btn-ghost"
             title="Find (Ctrl+F)"
           >
             <Search className="w-3 h-3" />
           </button>
           <button
             onClick={handleCopy}
-            className="flex items-center gap-1 text-xs px-2 py-1 rounded text-p-text-dim hover:text-p-text hover:bg-p-surface-hover tab-transition"
+            className="btn-ghost"
           >
             {copied ? <Check className="w-3 h-3 text-p-success" /> : <Copy className="w-3 h-3" />}
             {copied ? 'Copied' : 'Copy'}
@@ -330,7 +324,7 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
           {resolvedSavedPath && (
             <button
               onClick={() => showInFolder(resolvedSavedPath)}
-              className="flex items-center gap-1 text-xs px-2 py-1 rounded text-p-text-dim hover:text-p-text hover:bg-p-surface-hover tab-transition"
+              className="btn-ghost"
             >
               <FolderOpen className="w-3 h-3" />
               Show in folder
@@ -340,7 +334,7 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
           <div className="relative">
             <button
               onClick={() => setExportOpen(!exportOpen)}
-              className="flex items-center gap-1 text-xs px-2 py-1 rounded text-p-text-dim hover:text-p-text hover:bg-p-surface-hover tab-transition"
+              className="btn-ghost"
             >
               <Download className="w-3 h-3" />
               Export
@@ -349,28 +343,28 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
             {exportOpen && (
               <>
                 <div className="fixed inset-0 z-10" onClick={() => setExportOpen(false)} />
-                <div className="absolute right-0 top-full mt-1 z-20 bg-p-surface border border-p-border rounded-lg shadow-lg py-1 min-w-[140px]">
+                <div className="absolute right-0 top-full mt-1 z-20 bg-p-surface border border-p-border rounded-xl shadow-xl py-1.5 min-w-[160px]">
                   <button
                     onClick={() => { downloadMarkdown(fileName, md); setExportOpen(false); }}
-                    className="w-full text-left px-3 py-1.5 text-xs text-p-text hover:bg-p-surface-hover tab-transition"
+                    className="w-full text-left px-3 py-2 text-xs text-p-text hover:bg-p-surface-hover tab-transition"
                   >
                     Download .md
                   </button>
                   <button
                     onClick={() => { exportAsHtml(fileName, md); setExportOpen(false); }}
-                    className="w-full text-left px-3 py-1.5 text-xs text-p-text hover:bg-p-surface-hover tab-transition"
+                    className="w-full text-left px-3 py-2 text-xs text-p-text hover:bg-p-surface-hover tab-transition"
                   >
                     Export .html
                   </button>
                   <button
                     onClick={() => { exportAsDocx(fileName, md, setExporting); setExportOpen(false); }}
-                    className="w-full text-left px-3 py-1.5 text-xs text-p-text hover:bg-p-surface-hover tab-transition"
+                    className="w-full text-left px-3 py-2 text-xs text-p-text hover:bg-p-surface-hover tab-transition"
                   >
                     Export .docx
                   </button>
                   <button
                     onClick={() => { exportAsDocx(fileName, md, setExporting, 'logos'); setExportOpen(false); }}
-                    className="w-full text-left px-3 py-1.5 text-xs text-p-text hover:bg-p-surface-hover tab-transition"
+                    className="w-full text-left px-3 py-2 text-xs text-p-text hover:bg-p-surface-hover tab-transition"
                   >
                     Export .docx (Logos/Verbum)
                   </button>
@@ -396,7 +390,7 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
               if (e.key === 'Escape') closeFind();
             }}
             placeholder="Find in document..."
-            className="flex-1 px-2 py-1 text-xs bg-p-bg border border-p-border rounded text-p-text placeholder:text-p-text-dim focus:outline-none focus:border-p-accent"
+            className="flex-1 px-2 py-1 text-xs bg-p-bg border border-p-border rounded-md text-p-text placeholder:text-p-text-dim focus:outline-none focus:border-p-accent focus:shadow-[0_0_0_3px_var(--p-accent-glow)]"
             autoFocus
           />
           <span className="text-xs text-p-text-muted shrink-0">
@@ -478,8 +472,8 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
 
       {/* DOCX export overlay */}
       {exporting && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="rounded-xl bg-p-bg border border-p-border shadow-lg p-6 flex flex-col items-center gap-3">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 modal-backdrop">
+          <div className="rounded-xl bg-p-bg border border-p-border shadow-2xl p-6 flex flex-col items-center gap-3">
             <Loader2 className="w-8 h-8 text-p-accent animate-spin" />
             <span className="text-sm text-p-text">Exporting to Word...</span>
           </div>

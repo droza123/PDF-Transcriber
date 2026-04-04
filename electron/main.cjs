@@ -53,13 +53,27 @@ function createWindow() {
     autoHideMenuBar: true,
   });
 
-  // In production, load the built files
+  // Load built files in production/preview, or dev server during development
+  const distIndex = path.join(__dirname, '..', 'dist', 'index.html');
   if (app.isPackaged) {
-    mainWindow.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
+    mainWindow.loadFile(distIndex);
   } else {
-    // In dev, load from Vite dev server
+    // Check if the Vite dev server is running
     const devUrl = process.env.VITE_DEV_URL || 'http://localhost:3001';
-    mainWindow.loadURL(devUrl);
+    const http = require('http');
+    const url = new URL(devUrl);
+    const req = http.request({ hostname: url.hostname, port: url.port, path: '/', method: 'HEAD', timeout: 1000 }, () => {
+      mainWindow.loadURL(devUrl);
+    });
+    req.on('error', () => {
+      // Dev server not running — use built files (electron:preview mode)
+      mainWindow.loadFile(distIndex);
+    });
+    req.on('timeout', () => {
+      req.destroy();
+      mainWindow.loadFile(distIndex);
+    });
+    req.end();
   }
 
   // Inject referer/origin for API requests (Electron's file:// sends no referer,

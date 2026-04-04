@@ -86,7 +86,7 @@ export default function QueueItem({
       style={sortableStyle}
       className={`
         flex items-center gap-3 px-3 py-2.5 mb-1 rounded-lg
-        ${isPreview ? 'bg-p-accent/10 border border-p-accent/30' : 'hover:bg-p-surface-hover'}
+        ${isPreview ? 'glow-ring bg-p-accent/8' : 'card-hover'}
         ${isActive ? 'bg-p-surface' : ''}
       `}
     >
@@ -101,8 +101,8 @@ export default function QueueItem({
         <div className="flex items-center gap-1.5">
           <p className="text-sm font-medium text-p-text truncate" title={job.fileName}>{job.fileName}</p>
           {job.translationLanguage && (
-            <span className="text-[10px] font-medium text-sky-400 bg-sky-400/10 rounded-full px-1.5 py-0.5 shrink-0">
-              → {job.translationLanguage}
+            <span className="badge badge-accent shrink-0">
+              {'\u2192'} {job.translationLanguage}
             </span>
           )}
         </div>
@@ -135,9 +135,9 @@ export default function QueueItem({
 
         {/* Progress bar */}
         {job.status === 'converting' && job.phase === 'converting' && (
-          <div className="mt-1.5 h-1 bg-p-border rounded-full overflow-hidden">
+          <div className="mt-1.5 h-1.5 bg-p-border/50 rounded-full overflow-hidden">
             <div
-              className="h-full bg-p-accent rounded-full tab-transition"
+              className="h-full rounded-full progress-shimmer"
               style={{ width: `${job.progress}%` }}
             />
           </div>
@@ -150,7 +150,7 @@ export default function QueueItem({
 
         {/* Export errors */}
         {job.status === 'done' && job.exportErrors && (
-          <p className="text-xs text-amber-400 mt-0.5 truncate" title={job.exportErrors}>
+          <p className="text-xs text-p-warning mt-0.5 truncate" title={job.exportErrors}>
             Export failed: {job.exportErrors}
           </p>
         )}
@@ -164,12 +164,12 @@ export default function QueueItem({
       </div>
 
       {/* Actions */}
-      <div className="flex items-center gap-1 shrink-0">
+      <div className="flex items-center gap-0.5 shrink-0">
         {job.status === 'done' && (
           <>
             <button
               onClick={() => onPreview(job.id)}
-              className="p-1.5 rounded text-p-text-dim hover:text-p-accent hover:bg-p-surface-hover tab-transition"
+              className="p-1.5 rounded-md text-p-text-dim hover:text-p-accent hover:bg-p-surface-hover tab-transition"
               title="Preview"
             >
               <Eye className="w-3.5 h-3.5" />
@@ -177,7 +177,7 @@ export default function QueueItem({
             {job.savedPath ? (
               <button
                 onClick={() => showInFolder(job.savedPath!)}
-                className="p-1.5 rounded text-p-text-dim hover:text-p-success hover:bg-p-surface-hover tab-transition"
+                className="p-1.5 rounded-md text-p-text-dim hover:text-p-success hover:bg-p-surface-hover tab-transition"
                 title="Show in folder"
               >
                 <FolderOpen className="w-3.5 h-3.5" />
@@ -185,7 +185,7 @@ export default function QueueItem({
             ) : (
               <button
                 onClick={() => downloadMarkdown(job.fileName, job.markdown!)}
-                className="p-1.5 rounded text-p-text-dim hover:text-p-success hover:bg-p-surface-hover tab-transition"
+                className="p-1.5 rounded-md text-p-text-dim hover:text-p-success hover:bg-p-surface-hover tab-transition"
                 title="Download"
               >
                 <Download className="w-3.5 h-3.5" />
@@ -196,7 +196,7 @@ export default function QueueItem({
         {job.status === 'converting' && (
           <button
             onClick={() => onCancel(job.id)}
-            className="p-1.5 rounded text-p-text-dim hover:text-p-error tab-transition"
+            className="p-1.5 rounded-md text-p-text-dim hover:text-p-error tab-transition"
             title="Cancel"
           >
             <XCircle className="w-3.5 h-3.5" />
@@ -205,7 +205,7 @@ export default function QueueItem({
         {job.status === 'error' && (
           <button
             onClick={() => onRetry(job.id)}
-            className="p-1.5 rounded text-p-text-dim hover:text-p-accent hover:bg-p-surface-hover tab-transition"
+            className="p-1.5 rounded-md text-p-text-dim hover:text-p-accent hover:bg-p-surface-hover tab-transition"
             title="Retry"
           >
             <RefreshCw className="w-3.5 h-3.5" />
@@ -214,7 +214,7 @@ export default function QueueItem({
         {job.status !== 'converting' && (
           <button
             onClick={() => onRemove(job.id)}
-            className="p-1.5 rounded text-p-text-dim hover:text-p-error hover:bg-p-surface-hover tab-transition"
+            className="p-1.5 rounded-md text-p-text-dim hover:text-p-error hover:bg-p-surface-hover tab-transition"
             title="Remove"
           >
             <X className="w-3.5 h-3.5" />
