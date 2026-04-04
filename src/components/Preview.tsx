@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo, memo, startTransition } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Copy, Check, Download, FolderOpen, Hash, Table2, BookOpen, Footprints, Search, X, ChevronDown, ChevronUp, Columns2, FileText, Loader2 } from 'lucide-react';
+import { Copy, Check, Download, FolderOpen, Hash, Table2, BookOpen, Footprints, Search, X, ChevronDown, ChevronUp, Columns2, FileText, Loader2, Radio } from 'lucide-react';
 import type { ConversionJob } from '../types';
 import { downloadMarkdown, showInFolder, exportAsHtml, exportAsDocx } from '../lib/download';
 
@@ -425,6 +425,21 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
         </span>
         <span className="ml-auto">{(md.length / 1024).toFixed(1)} KB</span>
       </div>
+
+      {/* Live preview banner */}
+      {job?.status === 'converting' && md && (
+        <div className="flex items-center gap-2 px-4 py-1.5 border-b border-p-accent/20 bg-p-accent/5 shrink-0">
+          <Radio className="w-3.5 h-3.5 text-p-accent animate-pulse" />
+          <span className="text-xs text-p-accent font-medium">
+            Live preview
+          </span>
+          <span className="text-xs text-p-text-dim">
+            {job.currentBatch > 0 && job.totalBatches > 0
+              ? `${job.currentBatch} of ${job.totalBatches} ${job.translationLanguage ? 'chunks' : 'batches'} complete`
+              : 'Receiving...'}
+          </span>
+        </div>
+      )}
 
       {/* Content */}
       <div className={`flex-1 overflow-hidden ${sideBySide ? 'flex' : ''}`}>

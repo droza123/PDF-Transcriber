@@ -355,6 +355,7 @@ export default function App() {
                 completedBatches: completedChunks,
                 results,
               });
+              updateJob(jobId, { markdown: results.join('\n\n') });
               if (pausedRef.current) controller.abort();
             },
             onRetry: (attempt, delay, reason) => {
@@ -425,6 +426,7 @@ export default function App() {
             },
             onBatchComplete: async (progress) => {
               await window.electronAPI?.saveProgress(progress);
+              updateJob(jobId, { markdown: progress.results.join('\n\n') });
               addLogEntry(jobId, fileName, 'info', `Batch ${progress.completedBatches}/${progress.totalBatches} complete${lastActiveModel ? ` (${lastActiveModel})` : ''}`);
               if (pausedRef.current) {
                 controller.abort();
@@ -490,6 +492,7 @@ export default function App() {
                   completedBatches: completedChunks,
                   results,
                 });
+                updateJob(jobId, { markdown: results.join('\n\n') });
                 if (pausedRef.current) controller.abort();
               },
               onRetry: (attempt, delay, reason) => {
