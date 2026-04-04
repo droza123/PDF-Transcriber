@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { X, Save, GripVertical, RefreshCw, Info, Eye, EyeOff, Trash2, ExternalLink, Loader2, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { X, Save, GripVertical, RefreshCw, Info, Eye, EyeOff, Trash2, ExternalLink, Loader2, CheckCircle2, AlertTriangle, Cpu, FileOutput, SlidersHorizontal } from 'lucide-react';
 import { DndContext, closestCenter, type DragEndEvent } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -109,7 +109,10 @@ function SortableModelItem({
   );
 }
 
+type SettingsTab = 'provider' | 'output' | 'advanced';
+
 export default function Settings({ open, onClose, initialProvider }: SettingsProps) {
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>('provider');
   const [selectedProvider, setSelectedProvider] = useState<ProviderId>('gemini');
   const [modelPriority, setModelPriority] = useState<string[]>([]);
   const [batchSize, setBatchSize] = useState(10);
@@ -139,6 +142,7 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
 
   useEffect(() => {
     if (open) {
+      setSettingsTab('provider');
       const s = getSettings();
       const provider = initialProvider || s.activeProvider;
       setSelectedProvider(provider);
@@ -320,7 +324,7 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
         className="w-full max-w-lg max-h-[90vh] rounded-xl bg-p-bg border border-p-border shadow-2xl p-6 overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between mb-5">
+        <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold text-p-text" style={{ fontFamily: 'var(--font-display)' }}>Settings</h2>
           <button
             onClick={onClose}
@@ -330,7 +334,40 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
           </button>
         </div>
 
+        {/* Tab bar */}
+        <div className="flex items-center gap-5 border-b border-p-border-subtle mb-4">
+          <button
+            onClick={() => setSettingsTab('provider')}
+            className={`tab-underline text-xs tab-transition flex items-center gap-1.5 ${
+              settingsTab === 'provider' ? 'tab-underline-active' : 'text-p-text-dim hover:text-p-text'
+            }`}
+          >
+            <Cpu className="w-3.5 h-3.5" />
+            Provider
+          </button>
+          <button
+            onClick={() => setSettingsTab('output')}
+            className={`tab-underline text-xs tab-transition flex items-center gap-1.5 ${
+              settingsTab === 'output' ? 'tab-underline-active' : 'text-p-text-dim hover:text-p-text'
+            }`}
+          >
+            <FileOutput className="w-3.5 h-3.5" />
+            Output
+          </button>
+          <button
+            onClick={() => setSettingsTab('advanced')}
+            className={`tab-underline text-xs tab-transition flex items-center gap-1.5 ${
+              settingsTab === 'advanced' ? 'tab-underline-active' : 'text-p-text-dim hover:text-p-text'
+            }`}
+          >
+            <SlidersHorizontal className="w-3.5 h-3.5" />
+            Advanced
+          </button>
+        </div>
+
         <div className="space-y-4">
+          {/* ═══ PROVIDER TAB ═══ */}
+          {settingsTab === 'provider' && <>
           {/* Provider & API Key */}
           <div>
             <label className="section-label block mb-1">Provider</label>
@@ -603,8 +640,12 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
             </div>
           </div>
 
+          </>}
+
+          {/* ═══ OUTPUT TAB ═══ */}
+          {settingsTab === 'output' && <>
           {/* Batch size */}
-          <div className="section-divider">
+          <div>
             <label className="section-label block mb-1.5">Batch size</label>
             <select
               value={batchSize}
@@ -683,8 +724,12 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
             </p>
           </div>
 
+          </>}
+
+          {/* ═══ ADVANCED TAB ═══ */}
+          {settingsTab === 'advanced' && <>
           {/* Prevent sleep */}
-          <div className="section-divider">
+          <div>
             <label className="flex items-center gap-2 px-2 py-1 rounded-lg hover:bg-p-surface-hover cursor-pointer">
               <input
                 type="checkbox"
@@ -774,6 +819,7 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
               )}
             </div>
           </div>
+          </>}
         </div>
 
         <div className="flex items-center justify-end gap-3 mt-6">
