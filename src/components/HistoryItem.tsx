@@ -54,7 +54,7 @@ export default function HistoryItem({ entry, isActive, onPreview, onShowInFolder
           {' \u00b7 '}
           {formatDuration(entry.durationMs)}
           {entry.translationLanguage && (
-            <span className="text-sky-400"> \u00b7 \u2192 {entry.translationLanguage}</span>
+            <span className="text-sky-400">{' \u00b7 \u2192 '}{entry.translationLanguage}</span>
           )}
         </p>
 

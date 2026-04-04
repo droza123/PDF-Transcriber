@@ -438,12 +438,16 @@ export default function App() {
               }
 
               // Create transcription history entry
+              // Read totalPages from current job state (nextJob is stale — captured before convertFile updated it)
+              let currentTotalPages = nextJob.totalPages;
+              setJobs(prev => { const j = prev.find(x => x.id === jobId); if (j) currentTotalPages = j.totalPages; return prev; });
+              await new Promise(resolve => setTimeout(resolve, 50));
               const txEntry: HistoryEntry = {
                 id: crypto.randomUUID(),
                 fileName,
                 sourcePath: nextJob.sourcePath!,
                 savedPath: transcriptionSavedPath || '',
-                totalPages: nextJob.totalPages,
+                totalPages: currentTotalPages,
                 convertedAt: Date.now(),
                 durationMs: Date.now() - conversionStart,
               };
