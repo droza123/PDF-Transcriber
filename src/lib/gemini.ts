@@ -182,6 +182,12 @@ ${chunk}`;
 
 export interface TranslateMarkdownOptions {
   onProgress?: (update: { currentChunk: number; totalChunks: number; statusMessage: string }) => void;
+  /** Called after each chunk completes, with all results so far. Use for persistence. */
+  onChunkComplete?: (completedChunks: number, totalChunks: number, results: string[]) => void;
+  /** Number of chunks already completed (for resume). Skips those chunks. */
+  resumeFromChunk?: number;
+  /** Previously completed chunk results (for resume). */
+  resumeResults?: string[];
   onRetry?: (attempt: number, delaySec: number, reason?: string) => void;
   onModelSkip?: (skippedModel: string, nextModel: string | null, reason: string) => void;
   onModelStart?: (model: string) => void;
@@ -197,15 +203,16 @@ export async function translateMarkdown(
   targetLanguage: string,
   options: TranslateMarkdownOptions = {},
 ): Promise<string> {
-  const { onProgress, onRetry, onModelSkip, onModelStart, onStreamProgress, onError, abortSignal, skipModels } = options;
+  const { onProgress, onChunkComplete, resumeFromChunk, resumeResults, onRetry, onModelSkip, onModelStart, onStreamProgress, onError, abortSignal, skipModels } = options;
 
   const chunks = chunkMarkdown(markdown);
   const totalChunks = chunks.length;
-  const results: string[] = [];
+  const results: string[] = resumeResults ? [...resumeResults] : [];
+  const startChunk = resumeFromChunk ?? 0;
 
-  console.log(`[translate] Translating ${totalChunks} chunk(s) to ${targetLanguage}`);
+  console.log(`[translate] Translating ${totalChunks} chunk(s) to ${targetLanguage}${startChunk > 0 ? ` (resuming from chunk ${startChunk + 1})` : ''}`);
 
-  for (let i = 0; i < totalChunks; i++) {
+  for (let i = startChunk; i < totalChunks; i++) {
     if (abortSignal?.aborted) throw new DOMException('Cancelled', 'AbortError');
 
     const chunkNum = i + 1;
@@ -219,7 +226,6 @@ export async function translateMarkdown(
     const prompt = buildTranslationPrompt(chunks[i], chunkNum, totalChunks, targetLanguage);
     const result = await callTextWithRetry(prompt, {
       onRetry, onModelSkip, onStreamProgress, onError, abortSignal, skipModels,
-      // Restore the chunk status message when a new model starts (clears rate-limit messages)
       onModelStart: (model) => {
         onModelStart?.(model);
         onProgress?.({ currentChunk: chunkNum, totalChunks, statusMessage: chunkStatusMsg });
@@ -234,7 +240,10 @@ export async function translateMarkdown(
     if (text.endsWith('```')) text = text.slice(0, -3);
     results.push(text.trim());
 
-    onStreamProgress?.('streaming', 0); // reset for next chunk
+    // Persist progress after each chunk
+    onChunkComplete?.(chunkNum, totalChunks, results);
+
+    onStreamProgress?.('streaming', 0);
 
     if (i < totalChunks - 1) {
       await batchDelay();

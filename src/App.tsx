@@ -108,8 +108,11 @@ export default function App() {
 
       const rehydratedJobs: ConversionJob[] = [];
       for (const entry of savedQueue) {
-        const exists = await window.electronAPI.fileExists(entry.sourcePath);
-        if (!exists) continue;
+        // For markdown-based translations, sourcePath may not need to exist on disk
+        if (!entry.sourceMarkdown) {
+          const exists = await window.electronAPI.fileExists(entry.sourcePath);
+          if (!exists) continue;
+        }
 
         const progress = await window.electronAPI.loadProgress(entry.id);
 
@@ -126,13 +129,15 @@ export default function App() {
           totalBatches: entry.totalBatches || 0,
           totalPages: entry.totalPages || 0,
           statusMessage: progress
-            ? `Resumable (${progress.completedBatches}/${progress.totalBatches} batches done)`
+            ? `Resumable (${progress.completedBatches}/${progress.totalBatches} chunks done)`
             : 'Queued',
           markdown: null,
           error: null,
           startedAt: null,
           completedAt: null,
           resumeFrom: progress?.completedBatches,
+          translationLanguage: entry.translationLanguage,
+          sourceMarkdown: entry.sourceMarkdown,
         });
       }
 
@@ -207,6 +212,8 @@ export default function App() {
           totalBatches: j.totalBatches,
           completedBatches: j.currentBatch,
           addedAt: j.startedAt ?? Date.now(),
+          translationLanguage: j.translationLanguage || undefined,
+          sourceMarkdown: j.sourceMarkdown || undefined,
         }));
       window.electronAPI?.saveQueue(entries);
     }, 500);
@@ -299,11 +306,38 @@ export default function App() {
           addLogEntry(jobId, fileName, 'info', `Translating to ${nextJob.translationLanguage}`);
           updateJob(jobId, { status: 'converting', phase: 'converting', statusMessage: `Translating to ${nextJob.translationLanguage}...`, startedAt: Date.now() });
 
+          // Load partial translation progress for resume
+          let translateResumeChunk: number | undefined;
+          let translateResumeResults: string[] | undefined;
+          if (nextJob.resumeFrom && nextJob.resumeFrom > 0) {
+            const progress = await window.electronAPI?.loadProgress(jobId);
+            if (progress && progress.results.length > 0) {
+              translateResumeChunk = progress.completedBatches;
+              translateResumeResults = progress.results;
+              addLogEntry(jobId, fileName, 'info', `Resuming translation from chunk ${progress.completedBatches + 1}`);
+            }
+          }
+
           markdown = await translateMarkdown(nextJob.sourceMarkdown, nextJob.translationLanguage!, {
             ...commonStreamOpts,
+            resumeFromChunk: translateResumeChunk,
+            resumeResults: translateResumeResults,
             onProgress: ({ currentChunk, totalChunks, statusMessage }) => {
               updateJob(jobId, { currentBatch: currentChunk, totalBatches: totalChunks, statusMessage, progress: Math.round((currentChunk / totalChunks) * 100) });
               addLogEntry(jobId, fileName, 'info', statusMessage);
+            },
+            onChunkComplete: (completedChunks, totalChunks, results) => {
+              window.electronAPI?.saveProgress({
+                jobId,
+                fileName,
+                sourcePath: nextJob.sourcePath || '',
+                outline: '', // not used for translation
+                totalPages: nextJob.totalPages,
+                totalBatches: totalChunks,
+                completedBatches: completedChunks,
+                results,
+              });
+              if (pausedRef.current) controller.abort();
             },
             onRetry: (attempt, delay, reason) => {
               const msg = reason === 'rate_limited' ? `Rate limited \u2014 retrying in ${delay}s...` : `Retrying in ${delay}s (attempt ${attempt})...`;
@@ -426,6 +460,19 @@ export default function App() {
               onProgress: ({ currentChunk, totalChunks, statusMessage }) => {
                 updateJob(jobId, { currentBatch: currentChunk, totalBatches: totalChunks, statusMessage, progress: Math.round((currentChunk / totalChunks) * 100) });
                 addLogEntry(jobId, fileName, 'info', statusMessage);
+              },
+              onChunkComplete: (completedChunks, totalChunks, results) => {
+                window.electronAPI?.saveProgress({
+                  jobId,
+                  fileName,
+                  sourcePath: nextJob.sourcePath || '',
+                  outline: '', // not used for translation
+                  totalPages: nextJob.totalPages,
+                  totalBatches: totalChunks,
+                  completedBatches: completedChunks,
+                  results,
+                });
+                if (pausedRef.current) controller.abort();
               },
               onRetry: (attempt, delay, reason) => {
                 const msg = reason === 'rate_limited' ? `Rate limited \u2014 retrying in ${delay}s...` : `Retrying in ${delay}s (attempt ${attempt})...`;

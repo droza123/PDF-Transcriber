@@ -36,6 +36,8 @@ export interface SerializedQueueEntry {
   totalBatches: number;
   completedBatches: number;
   addedAt: number;
+  translationLanguage?: string;
+  sourceMarkdown?: string;
 }
 
 /** A completed conversion stored in history. */
