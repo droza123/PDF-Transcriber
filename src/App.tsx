@@ -279,22 +279,46 @@ export default function App() {
           });
         } else {
           // ── PDF conversion (with optional two-pass translation) ─────────
-          let fileObj = nextJob.file;
-          if (!fileObj || !(fileObj instanceof File) || fileObj.size === 0) {
-            if (!nextJob.sourcePath) throw new Error('Source PDF path not available');
-            const buffer = await window.electronAPI!.readPdf(nextJob.sourcePath);
-            fileObj = new File([buffer], nextJob.fileName, { type: 'application/pdf' });
+
+          // Optimization: if translating and a transcription already exists in history,
+          // skip the PDF conversion and go straight to translation.
+          let existingTranscription: string | null = null;
+          if (nextJob.translationLanguage && nextJob.sourcePath) {
+            const existingEntry = historyRef.current.find(
+              h => h.sourcePath === nextJob.sourcePath && !h.translationLanguage,
+            );
+            if (existingEntry) {
+              let md = await window.electronAPI?.readMarkdown(existingEntry.savedPath) ?? null;
+              if (!md) md = await window.electronAPI?.loadInternalMarkdown(existingEntry.id) ?? null;
+              if (md) {
+                existingTranscription = md;
+                addLogEntry(jobId, fileName, 'info', 'Using existing transcription from history');
+                updateJob(jobId, { status: 'converting', phase: 'converting', statusMessage: `Translating to ${nextJob.translationLanguage}...`, startedAt: Date.now() });
+              }
+            }
           }
 
-          let resumeFrom = undefined;
-          if (nextJob.resumeFrom && nextJob.resumeFrom > 0) {
-            resumeFrom = (await window.electronAPI?.loadProgress(jobId)) ?? undefined;
-          }
+          let transcription: string;
 
-          addLogEntry(jobId, fileName, 'info', `Started converting ${fileName}`);
+          if (existingTranscription) {
+            transcription = existingTranscription;
+          } else {
+            // Full PDF conversion needed
+            let fileObj = nextJob.file;
+            if (!fileObj || !(fileObj instanceof File) || fileObj.size === 0) {
+              if (!nextJob.sourcePath) throw new Error('Source PDF path not available');
+              const buffer = await window.electronAPI!.readPdf(nextJob.sourcePath);
+              fileObj = new File([buffer], nextJob.fileName, { type: 'application/pdf' });
+            }
 
-          // Phase 1: Always transcribe first (no translation in prompt)
-          const transcription = await convertFile({
+            let resumeFrom = undefined;
+            if (nextJob.resumeFrom && nextJob.resumeFrom > 0) {
+              resumeFrom = (await window.electronAPI?.loadProgress(jobId)) ?? undefined;
+            }
+
+            addLogEntry(jobId, fileName, 'info', `Started converting ${fileName}`);
+
+            transcription = await convertFile({
             file: fileObj,
             jobId,
             sourcePath: nextJob.sourcePath || '',
@@ -325,34 +349,38 @@ export default function App() {
             abortSignal: controller.signal,
           });
 
-          // Save transcription internally (always)
-          await window.electronAPI?.saveInternalMarkdown(jobId, transcription);
+            // Save transcription internally (always)
+            await window.electronAPI?.saveInternalMarkdown(jobId, transcription);
+          }
 
-          // If translating: save transcription, create history entry, then translate
+          // If translating: save transcription (if new), then translate
           if (nextJob.translationLanguage) {
-            // Export transcription if setting is on
-            const { exportTranscriptionWithTranslation } = getSettings();
-            let transcriptionSavedPath: string | null = null;
-            if (exportTranscriptionWithTranslation && nextJob.sourcePath && canSaveToSource()) {
-              try {
-                const txResult = await runAutoExport(nextJob.sourcePath, nextJob.fileName, transcription, jobId);
-                transcriptionSavedPath = txResult.savedPath;
-              } catch { /* best effort */ }
+            if (!existingTranscription) {
+              // Export transcription if setting is on (skip if reusing existing)
+              const { exportTranscriptionWithTranslation } = getSettings();
+              let transcriptionSavedPath: string | null = null;
+              if (exportTranscriptionWithTranslation && nextJob.sourcePath && canSaveToSource()) {
+                try {
+                  const txResult = await runAutoExport(nextJob.sourcePath, nextJob.fileName, transcription, jobId);
+                  transcriptionSavedPath = txResult.savedPath;
+                } catch { /* best effort */ }
+              }
+
+              // Create transcription history entry
+              const txEntry: HistoryEntry = {
+                id: crypto.randomUUID(),
+                fileName,
+                sourcePath: nextJob.sourcePath!,
+                savedPath: transcriptionSavedPath || '',
+                totalPages: nextJob.totalPages,
+                convertedAt: Date.now(),
+                durationMs: Date.now() - conversionStart,
+              };
+              setHistory(prev => [txEntry, ...prev].sort((a, b) => b.convertedAt - a.convertedAt));
+
+              addLogEntry(jobId, fileName, 'success', 'Transcription complete. Starting translation...');
             }
 
-            // Create transcription history entry
-            const txEntry: HistoryEntry = {
-              id: crypto.randomUUID(),
-              fileName,
-              sourcePath: nextJob.sourcePath!,
-              savedPath: transcriptionSavedPath || '',
-              totalPages: nextJob.totalPages,
-              convertedAt: Date.now(),
-              durationMs: Date.now() - conversionStart,
-            };
-            setHistory(prev => [txEntry, ...prev].sort((a, b) => b.convertedAt - a.convertedAt));
-
-            addLogEntry(jobId, fileName, 'success', 'Transcription complete. Starting translation...');
             updateJob(jobId, { progress: 0, currentBatch: 0, totalBatches: 0, streamPhase: undefined, streamChars: 0, statusMessage: `Translating to ${nextJob.translationLanguage}...` });
 
             // Phase 2: Translate the transcription
