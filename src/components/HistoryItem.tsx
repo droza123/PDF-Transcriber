@@ -49,8 +49,7 @@ export default function HistoryItem({ entry, isActive, onPreview, onShowInFolder
         <p className="text-sm font-medium text-p-text truncate" title={entry.fileName}>{entry.fileName}</p>
         <p className="text-xs text-p-text-muted truncate">
           {formatDate(entry.convertedAt)}
-          {' \u00b7 '}
-          {entry.totalPages} pages
+          {entry.totalPages > 0 && <>{' \u00b7 '}{entry.totalPages} pages</>}
           {' \u00b7 '}
           {formatDuration(entry.durationMs)}
           {entry.translationLanguage && (
