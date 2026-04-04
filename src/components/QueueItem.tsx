@@ -169,7 +169,7 @@ export default function QueueItem({
         {job.status === 'converting' && job.markdown && (
           <button
             onClick={() => onPreview(job.id)}
-            className="p-1.5 rounded-md text-p-accent hover:bg-p-surface-hover tab-transition"
+            className="p-1.5 rounded-md text-p-text-dim hover:text-p-accent hover:bg-p-surface-hover tab-transition"
             title="Live preview"
           >
             <Eye className="w-3.5 h-3.5" />

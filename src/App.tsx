@@ -144,7 +144,7 @@ export default function App() {
           statusMessage: progress
             ? `Resumable (${progress.completedBatches}/${progress.totalBatches} chunks done)`
             : 'Queued',
-          markdown: null,
+          markdown: progress?.results.length ? progress.results.join('\n\n') : null,
           error: null,
           startedAt: null,
           completedAt: null,
@@ -853,7 +853,7 @@ export default function App() {
   }, [history]);
 
   // ── Derived state ─────────────────────────────────────────────────────────
-  const previewJob = jobs.find(j => j.id === previewJobId && j.status === 'done');
+  const previewJob = jobs.find(j => j.id === previewJobId && (j.status === 'done' || (j.status === 'converting' && j.markdown)));
   const previewHistoryEntry = history.find(h => h.id === previewJobId);
 
   const showQueuePreview = previewSource === 'queue' && previewJob;
