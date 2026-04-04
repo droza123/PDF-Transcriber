@@ -2,6 +2,7 @@ import { Sun, Moon, Settings2 } from 'lucide-react';
 import { hasApiKey, getApiKey } from '../lib/apiKey';
 import { getSettings } from '../lib/settings';
 import { getAllProviders } from '../lib/providers/registry';
+import appIcon from '../../build/icon.png';
 
 interface HeaderProps {
   theme: 'dark' | 'light';
@@ -20,9 +21,7 @@ export default function Header({ theme, keyPresent, onToggleTheme, onOpenSetting
   return (
     <header className="flex items-center justify-between px-6 py-3.5 border-b border-p-border bg-p-bg/80 backdrop-blur-sm relative z-10">
       <div className="flex items-center gap-3.5">
-        <div className="w-8 h-8 rounded-lg bg-p-accent/15 flex items-center justify-center">
-          <span className="text-p-accent font-bold text-sm" style={{ fontFamily: 'var(--font-display)' }}>P</span>
-        </div>
+        <img src={appIcon} alt="PDF Transcriber" className="w-8 h-8 rounded-lg" />
         <div>
           <h1 className="text-[17px] font-semibold text-p-text tracking-tight" style={{ fontFamily: 'var(--font-display)' }}>
             PDF Transcriber
