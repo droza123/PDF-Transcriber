@@ -111,7 +111,7 @@ export function batchDelay(): Promise<void> {
 
 // ── Markdown translation ────────────────────────────────────────────────────
 
-const TARGET_CHUNK_WORDS = 5000;
+const TARGET_CHUNK_WORDS = 2000;
 
 /**
  * Split markdown into chunks on heading or paragraph boundaries.
