@@ -1,5 +1,13 @@
 import * as pdfjsLib from 'pdfjs-dist';
 
+// Polyfill Uint8Array.prototype.toHex — used internally by pdfjs-dist but
+// not available in all Chromium/Electron builds.
+if (typeof (Uint8Array.prototype as any).toHex !== 'function') {
+  (Uint8Array.prototype as any).toHex = function (this: Uint8Array) {
+    return Array.from(this, b => b.toString(16).padStart(2, '0')).join('');
+  };
+}
+
 // Use the bundled worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   'pdfjs-dist/build/pdf.worker.min.mjs',
