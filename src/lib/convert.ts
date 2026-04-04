@@ -18,7 +18,6 @@ export interface ConvertFileOptions {
   onBatchComplete: (progress: PartialProgress) => void;
   resumeFrom?: PartialProgress;
   abortSignal?: AbortSignal;
-  translationLanguage?: string;
 }
 
 /** Strip markdown code fences that Gemini sometimes wraps output in. */
@@ -66,7 +65,7 @@ model: "${model}"
 
 /** Convert a single PDF file to Markdown, with optional resume and cancel support. */
 export async function convertFile(options: ConvertFileOptions): Promise<string> {
-  const { file, jobId, sourcePath, onProgress, onBatchComplete, resumeFrom, abortSignal, translationLanguage } = options;
+  const { file, jobId, sourcePath, onProgress, onBatchComplete, resumeFrom, abortSignal } = options;
   const BATCH_SIZE = getBatchSize();
 
   // In-memory set of models to skip — accumulates across batches within this job only.
@@ -171,7 +170,6 @@ export async function convertFile(options: ConvertFileOptions): Promise<string> 
       onModelStart,
       onStreamProgress,
       onError,
-      translationLanguage,
     );
     onProgress({ streamPhase: undefined, streamChars: 0 });
     results.push(stripCodeFences(result.text));

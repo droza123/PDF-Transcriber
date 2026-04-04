@@ -278,8 +278,7 @@ export default function App() {
             },
           });
         } else {
-          // ── Normal PDF conversion ───────────────────────────────────────
-          // Reconstruct File object if rehydrated
+          // ── PDF conversion (with optional two-pass translation) ─────────
           let fileObj = nextJob.file;
           if (!fileObj || !(fileObj instanceof File) || fileObj.size === 0) {
             if (!nextJob.sourcePath) throw new Error('Source PDF path not available');
@@ -287,7 +286,6 @@ export default function App() {
             fileObj = new File([buffer], nextJob.fileName, { type: 'application/pdf' });
           }
 
-          // Load partial progress for resume
           let resumeFrom = undefined;
           if (nextJob.resumeFrom && nextJob.resumeFrom > 0) {
             resumeFrom = (await window.electronAPI?.loadProgress(jobId)) ?? undefined;
@@ -295,7 +293,8 @@ export default function App() {
 
           addLogEntry(jobId, fileName, 'info', `Started converting ${fileName}`);
 
-          markdown = await convertFile({
+          // Phase 1: Always transcribe first (no translation in prompt)
+          const transcription = await convertFile({
             file: fileObj,
             jobId,
             sourcePath: nextJob.sourcePath || '',
@@ -324,8 +323,57 @@ export default function App() {
             },
             resumeFrom,
             abortSignal: controller.signal,
-            translationLanguage: nextJob.translationLanguage,
           });
+
+          // Save transcription internally (always)
+          await window.electronAPI?.saveInternalMarkdown(jobId, transcription);
+
+          // If translating: save transcription, create history entry, then translate
+          if (nextJob.translationLanguage) {
+            // Export transcription if setting is on
+            const { exportTranscriptionWithTranslation } = getSettings();
+            let transcriptionSavedPath: string | null = null;
+            if (exportTranscriptionWithTranslation && nextJob.sourcePath && canSaveToSource()) {
+              try {
+                const txResult = await runAutoExport(nextJob.sourcePath, nextJob.fileName, transcription, jobId);
+                transcriptionSavedPath = txResult.savedPath;
+              } catch { /* best effort */ }
+            }
+
+            // Create transcription history entry
+            const txEntry: HistoryEntry = {
+              id: crypto.randomUUID(),
+              fileName,
+              sourcePath: nextJob.sourcePath!,
+              savedPath: transcriptionSavedPath || '',
+              totalPages: nextJob.totalPages,
+              convertedAt: Date.now(),
+              durationMs: Date.now() - conversionStart,
+            };
+            setHistory(prev => [txEntry, ...prev].sort((a, b) => b.convertedAt - a.convertedAt));
+
+            addLogEntry(jobId, fileName, 'success', 'Transcription complete. Starting translation...');
+            updateJob(jobId, { progress: 0, currentBatch: 0, totalBatches: 0, streamPhase: undefined, streamChars: 0, statusMessage: `Translating to ${nextJob.translationLanguage}...` });
+
+            // Phase 2: Translate the transcription
+            markdown = await translateMarkdown(transcription, nextJob.translationLanguage, {
+              ...commonStreamOpts,
+              onProgress: ({ currentChunk, totalChunks, statusMessage }) => {
+                updateJob(jobId, { currentBatch: currentChunk, totalBatches: totalChunks, statusMessage, progress: Math.round((currentChunk / totalChunks) * 100) });
+                addLogEntry(jobId, fileName, 'info', statusMessage);
+              },
+              onRetry: (attempt, delay, reason) => {
+                const msg = reason === 'rate_limited' ? `Rate limited \u2014 retrying in ${delay}s...` : `Retrying in ${delay}s (attempt ${attempt})...`;
+                updateJob(jobId, { statusMessage: msg });
+              },
+              onModelSkip: (skippedModel, nextModel, reason) => {
+                const msg = nextModel ? `Skipping ${skippedModel} (${reason}), trying ${nextModel}...` : `Skipping ${skippedModel} (${reason}), no more models`;
+                updateJob(jobId, { statusMessage: msg });
+              },
+            });
+          } else {
+            markdown = transcription;
+          }
         }
 
         // Clean up progress file

@@ -42,6 +42,7 @@ export interface AppSettings {
   translationEnabled: boolean;
   translationLanguage: string;
   translationLanguages: string[];
+  exportTranscriptionWithTranslation: boolean;
 }
 
 const STORAGE_KEY = 'app_settings';
@@ -62,6 +63,7 @@ const DEFAULTS: AppSettings = {
   translationEnabled: false,
   translationLanguage: '',
   translationLanguages: [...DEFAULT_TRANSLATION_LANGUAGES],
+  exportTranscriptionWithTranslation: true,
 };
 
 export function getSettings(): AppSettings {

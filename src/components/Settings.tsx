@@ -133,6 +133,7 @@ export default function Settings({ open, onClose }: SettingsProps) {
   const [autoFreeModels, setAutoFreeModels] = useState(true);
   const [freeOnlyFilter, setFreeOnlyFilter] = useState(true);
   const [openrouterModelData, setOpenrouterModelData] = useState<ProviderModel[]>([]);
+  const [exportTranscription, setExportTranscription] = useState(true);
 
   useEffect(() => {
     if (open) {
@@ -151,6 +152,7 @@ export default function Settings({ open, onClose }: SettingsProps) {
       setCachedModels(getCachedModels(provider));
       setSkippedModels(new Map(getSessionSkippedModels()));
       setAutoFreeModels(s.openrouterAutoFreeModels);
+      setExportTranscription(s.exportTranscriptionWithTranslation);
       setFreeOnlyFilter(true);
       // Reset key editing state
       setEditingKey(false);
@@ -303,7 +305,7 @@ export default function Settings({ open, onClose }: SettingsProps) {
   const handleSave = () => {
     const settings = getSettings();
     const providerModelPriority = { ...settings.providerModelPriority, [selectedProvider]: modelPriority };
-    saveSettings({ activeProvider: selectedProvider, providerModelPriority, openrouterAutoFreeModels: autoFreeModels, batchSize, outputNotes, autoExportFormats, fileNaming, preventSleep, translationEnabled, translationLanguage, translationLanguages });
+    saveSettings({ activeProvider: selectedProvider, providerModelPriority, openrouterAutoFreeModels: autoFreeModels, batchSize, outputNotes, autoExportFormats, fileNaming, preventSleep, translationEnabled, translationLanguage, translationLanguages, exportTranscriptionWithTranslation: exportTranscription });
     onClose();
   };
 
@@ -661,6 +663,22 @@ export default function Settings({ open, onClose }: SettingsProps) {
               <option value="overwrite">Overwrite existing file</option>
               <option value="unique">Create new file with number suffix</option>
             </select>
+          </div>
+
+          {/* Translation export option */}
+          <div className="border-t border-p-border pt-4">
+            <label className="flex items-center gap-2 px-2 py-1 rounded-lg hover:bg-p-surface-hover cursor-pointer">
+              <input
+                type="checkbox"
+                checked={exportTranscription}
+                onChange={(e) => setExportTranscription(e.target.checked)}
+                className="shrink-0 accent-p-accent"
+              />
+              <span className="text-sm text-p-text">Also export original transcription when translating</span>
+            </label>
+            <p className="text-xs text-p-text-dim mt-1 px-2">
+              When translating, the app first transcribes the PDF, then translates the result. The original transcription is always saved internally. This controls whether it is also exported as files.
+            </p>
           </div>
 
           {/* Prevent sleep */}
