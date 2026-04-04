@@ -123,9 +123,11 @@ export default function QueueItem({
             {job.streamPhase === 'processing' && 'Waiting for model...'}
             {job.streamPhase === 'streaming' && (
               <>
-                Receiving... {job.streamChars && job.streamChars >= 1000
-                  ? `${(job.streamChars / 1000).toFixed(1)}k`
-                  : job.streamChars ?? 0} chars
+                {job.streamChars
+                  ? <>Receiving... {job.streamChars >= 1000
+                      ? `${(job.streamChars / 1000).toFixed(1)}k`
+                      : job.streamChars} chars</>
+                  : 'Waiting for response...'}
               </>
             )}
           </p>
