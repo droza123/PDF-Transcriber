@@ -8,9 +8,26 @@ if (typeof (Uint8Array.prototype as any).toHex !== 'function') {
   };
 }
 
-// Disable the Web Worker so pdfjs-dist runs in the main thread where our
-// polyfill is active. The worker has its own scope and can't see the polyfill.
-pdfjsLib.GlobalWorkerOptions.workerSrc = '';
+// Build a worker Blob URL that injects the toHex polyfill before loading the
+// real pdfjs worker. This is necessary because Web Workers have their own
+// global scope and can't see polyfills applied in the main thread.
+const realWorkerUrl = new URL(
+  'pdfjs-dist/build/pdf.worker.min.mjs',
+  import.meta.url,
+).toString();
+
+const workerBlob = new Blob(
+  [
+    `if (typeof Uint8Array.prototype.toHex !== 'function') {`,
+    `  Uint8Array.prototype.toHex = function() {`,
+    `    return Array.from(this, b => b.toString(16).padStart(2, '0')).join('');`,
+    `  };`,
+    `}`,
+    `import "${realWorkerUrl}";`,
+  ],
+  { type: 'text/javascript' },
+);
+pdfjsLib.GlobalWorkerOptions.workerSrc = URL.createObjectURL(workerBlob);
 
 export interface PdfImage {
   base64: string;
