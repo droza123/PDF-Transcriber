@@ -1,7 +1,7 @@
 {
   "name": "pdf-to-markdown-batch",
   "private": true,
-  "version": "1.28.3",
+  "version": "1.28.4",
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {

@@ -6,7 +6,7 @@ import { hasApiKey, getApiKey } from './lib/apiKey';
 import { convertFile } from './lib/convert';
 import { translateMarkdown } from './lib/gemini';
 import { canSaveToSource, runAutoExport, exportHistoryAsCsv } from './lib/download';
-import { getSettings, saveSettings } from './lib/settings';
+import { getSettings, saveSettings, addSessionSkippedModel } from './lib/settings';
 import { getProvider } from './lib/providers/registry';
 import { OpenRouterProvider } from './lib/providers/openrouter';
 import Header from './components/Header';
@@ -295,6 +295,11 @@ export default function App() {
         const skipModels = new Set<string>();
         const commonStreamOpts = {
           onModelStart: (model: string) => { updateJob(jobId, { activeModel: model }); if (model !== lastActiveModel) { addLogEntry(jobId, fileName, 'info', `Using model: ${model}`); lastActiveModel = model; } },
+          onModelSkip: (skippedModel: string, nextModel: string | null, reason: string) => {
+            addSessionSkippedModel(skippedModel, reason);
+            const msg = nextModel ? `Skipping ${skippedModel} (${reason}), trying ${nextModel}...` : `Skipping ${skippedModel} (${reason}), no more models`;
+            updateJob(jobId, { statusMessage: msg });
+          },
           onStreamProgress: (phase: 'uploading' | 'processing' | 'streaming', charsReceived: number) => { updateJob(jobId, { streamPhase: phase, streamChars: charsReceived }); },
           onError: (model: string, reason: string, action: string) => { updateJob(jobId, { errorDetail: `${model}: ${reason} (${action})` }); addLogEntry(jobId, fileName, 'error', `${model}: ${reason} (${action})`); },
           abortSignal: controller.signal,
@@ -341,10 +346,6 @@ export default function App() {
             },
             onRetry: (attempt, delay, reason) => {
               const msg = reason === 'rate_limited' ? `Rate limited \u2014 retrying in ${delay}s...` : `Retrying in ${delay}s (attempt ${attempt})...`;
-              updateJob(jobId, { statusMessage: msg });
-            },
-            onModelSkip: (skippedModel, nextModel, reason) => {
-              const msg = nextModel ? `Skipping ${skippedModel} (${reason}), trying ${nextModel}...` : `Skipping ${skippedModel} (${reason}), no more models`;
               updateJob(jobId, { statusMessage: msg });
             },
           });
@@ -480,10 +481,6 @@ export default function App() {
               },
               onRetry: (attempt, delay, reason) => {
                 const msg = reason === 'rate_limited' ? `Rate limited \u2014 retrying in ${delay}s...` : `Retrying in ${delay}s (attempt ${attempt})...`;
-                updateJob(jobId, { statusMessage: msg });
-              },
-              onModelSkip: (skippedModel, nextModel, reason) => {
-                const msg = nextModel ? `Skipping ${skippedModel} (${reason}), trying ${nextModel}...` : `Skipping ${skippedModel} (${reason}), no more models`;
                 updateJob(jobId, { statusMessage: msg });
               },
             });
