@@ -947,7 +947,7 @@ export default function App() {
         </div>
 
         {/* Right panel: preview */}
-        <div className="hidden lg:flex flex-1 flex-col paper-bg min-w-0">
+        <div className={`hidden lg:flex flex-1 flex-col min-w-0 ${showQueuePreview || showHistoryPreview ? 'bg-p-bg-deep' : 'paper-bg'}`}>
           {!keyPresent ? (
             <Welcome
               onOpenSettings={() => setSettingsOpen(true)}

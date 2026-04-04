@@ -28,23 +28,23 @@
 /* ─── Dark Theme (default) ────────────────────────────────────────────────── */
 
 :root {
-  --p-bg: #171520;
-  --p-bg-deep: #12101b;
-  --p-surface: #1f1d2b;
-  --p-surface-hover: #282636;
-  --p-surface-raised: #2a2840;
-  --p-border: #332f48;
-  --p-border-subtle: #252336;
-  --p-text: #e8e2d6;
-  --p-text-muted: #9e96a8;
-  --p-text-dim: #6e6680;
+  --p-bg: #131218;
+  --p-bg-deep: #0e0d14;
+  --p-surface: #1c1b25;
+  --p-surface-hover: #252430;
+  --p-surface-raised: #2b2a38;
+  --p-border: #363445;
+  --p-border-subtle: #222130;
+  --p-text: #ede8dc;
+  --p-text-muted: #ada6b8;
+  --p-text-dim: #827c92;
   --p-accent: #c9956b;
   --p-accent-bright: #e0b48e;
   --p-accent-dim: #a87a52;
-  --p-accent-glow: rgba(201, 149, 107, 0.12);
-  --p-success: #7c9a8e;
-  --p-error: #c87272;
-  --p-warning: #d4a853;
+  --p-accent-glow: rgba(201, 149, 107, 0.14);
+  --p-success: #8aab9e;
+  --p-error: #d07a7a;
+  --p-warning: #dbb35c;
 }
 
 /* ─── Light Theme ─────────────────────────────────────────────────────────── */
