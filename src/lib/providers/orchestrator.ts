@@ -101,3 +101,81 @@ export async function callWithRetry(
   const details = failureLog.map(f => `${f.model} (${f.reason})`).join(', ');
   throw new Error(`All models failed. Tried: ${details}`);
 }
+
+/**
+ * Text-only version of callWithRetry — no PDF blob.
+ * Used for markdown translation.
+ */
+export async function callTextWithRetry(
+  prompt: string,
+  options: OrchestratorCallOptions = {},
+): Promise<ProviderResult> {
+  const { onRetry, onModelSkip, onModelStart, onStreamProgress, onError, abortSignal, skipModels } = options;
+  const provider: Provider = getActiveProvider();
+
+  const allModels = getActiveModelPriority();
+  const models = allModels.filter(m => !skipModels?.has(m));
+
+  if (models.length === 0) {
+    const skippedList = allModels.map(m => `${m} (previously failed)`).join(', ');
+    throw new Error(`All models failed. Every model in your priority list was skipped due to prior errors: ${skippedList}`);
+  }
+
+  const TRIES_PER_MODEL = 2;
+  const maxAttempts = models.length * TRIES_PER_MODEL;
+  const failureLog: { model: string; reason: string }[] = [];
+  const rateLimitHits = new Set<string>();
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const model = models[Math.floor((attempt - 1) / TRIES_PER_MODEL) % models.length];
+    onModelStart?.(model);
+
+    try {
+      if (abortSignal?.aborted) throw new DOMException('Cancelled', 'AbortError');
+      console.log(`[${provider.id}] Text attempt ${attempt}/${maxAttempts} with ${model}`);
+
+      return await provider.callText({
+        model,
+        prompt,
+        maxOutputTokens: MAX_OUTPUT_TOKENS,
+        abortSignal,
+        onStreamProgress,
+      });
+    } catch (error: any) {
+      if (error.name === 'AbortError') throw error;
+
+      const reason = provider.summarizeError(error);
+      failureLog.push({ model, reason });
+      console.warn(`[${provider.id}] Text attempt ${attempt} failed (${model}): ${reason}`);
+
+      const isRateLimit = provider.isRateLimitError(error);
+      const repeatedRateLimit = isRateLimit && rateLimitHits.has(model);
+      if (isRateLimit) rateLimitHits.add(model);
+      const shouldSkip = provider.isPersistentError(error) || repeatedRateLimit;
+
+      const nextModelInRotation = attempt < maxAttempts
+        ? models[Math.floor(attempt / TRIES_PER_MODEL) % models.length]
+        : null;
+
+      if (shouldSkip && skipModels) {
+        skipModels.add(model);
+        const nextAvailable = models.find(m => m !== model && !skipModels.has(m)) ?? null;
+        onError?.(model, reason, nextAvailable ? `skipping model, trying ${nextAvailable}` : 'skipping model, no models left');
+        onModelSkip?.(model, nextAvailable, reason);
+      } else if (attempt < maxAttempts) {
+        onError?.(model, reason, `retrying with ${nextModelInRotation}`);
+      } else {
+        onError?.(model, reason, 'no retries left');
+      }
+
+      if (attempt < maxAttempts) {
+        const delaySec = shouldSkip ? 2 : isRateLimit ? 10 : attempt * 5;
+        onRetry?.(attempt + 1, delaySec, isRateLimit ? 'rate_limited' : undefined);
+        await new Promise(resolve => setTimeout(resolve, delaySec * 1000));
+      }
+    }
+  }
+
+  const details = failureLog.map(f => `${f.model} (${f.reason})`).join(', ');
+  throw new Error(`All models failed. Tried: ${details}`);
+}

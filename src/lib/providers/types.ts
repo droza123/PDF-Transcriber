@@ -50,6 +50,12 @@ export interface Provider {
    */
   call(pdfBlob: Blob, options: ProviderCallOptions): Promise<ProviderResult>;
 
+  /**
+   * Text-only call (no PDF). Used for markdown translation.
+   * Sends a text prompt and streams back the response.
+   */
+  callText(options: ProviderCallOptions): Promise<ProviderResult>;
+
   /** Classify errors thrown by call(). */
   isRateLimitError(error: any): boolean;
   isPersistentError(error: any): boolean;

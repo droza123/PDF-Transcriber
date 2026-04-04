@@ -4,6 +4,7 @@ import type { ConversionJob, HistoryEntry, LogEntry } from './types';
 import { createJob } from './types';
 import { hasApiKey, getApiKey } from './lib/apiKey';
 import { convertFile } from './lib/convert';
+import { translateMarkdown } from './lib/gemini';
 import { canSaveToSource, runAutoExport, exportHistoryAsCsv } from './lib/download';
 import { getSettings, saveSettings } from './lib/settings';
 import { getProvider } from './lib/providers/registry';
@@ -242,60 +243,90 @@ export default function App() {
       abortControllers.current.set(jobId, controller);
 
       try {
-        // Reconstruct File object if rehydrated
-        let fileObj = nextJob.file;
-        if (!fileObj || !(fileObj instanceof File) || fileObj.size === 0) {
-          if (!nextJob.sourcePath) throw new Error('Source PDF path not available');
-          const buffer = await window.electronAPI!.readPdf(nextJob.sourcePath);
-          fileObj = new File([buffer], nextJob.fileName, { type: 'application/pdf' });
-        }
-
-        // Load partial progress for resume
-        let resumeFrom = undefined;
-        if (nextJob.resumeFrom && nextJob.resumeFrom > 0) {
-          resumeFrom = (await window.electronAPI?.loadProgress(jobId)) ?? undefined;
-        }
-
         const fileName = nextJob.fileName;
         const conversionStart = Date.now();
         let lastActiveModel = '';
-        addLogEntry(jobId, fileName, 'info', `Started converting ${fileName}`);
+        let markdown: string;
 
-        const markdown = await convertFile({
-          file: fileObj,
-          jobId,
-          sourcePath: nextJob.sourcePath || '',
-          onProgress: update => {
-            updateJob(jobId, update);
-            // Log model changes (covers scanning + batch phases)
-            if (update.activeModel && update.activeModel !== lastActiveModel) {
-              addLogEntry(jobId, fileName, 'info', `Using model: ${update.activeModel}`);
-            }
-            if (update.activeModel) lastActiveModel = update.activeModel;
-            // Log key phase transitions
-            if (update.statusMessage?.startsWith('Scanning document')) {
-              addLogEntry(jobId, fileName, 'info', 'Scanning document structure...');
-            }
-            if (update.statusMessage?.startsWith('Structure scan complete')) {
-              addLogEntry(jobId, fileName, 'success', update.statusMessage);
-            }
-            // Log every error from the Gemini API
-            if (update.errorDetail) {
-              addLogEntry(jobId, fileName, 'error', update.errorDetail);
-            }
-          },
-          onBatchComplete: async (progress) => {
-            await window.electronAPI?.saveProgress(progress);
-            addLogEntry(jobId, fileName, 'info', `Batch ${progress.completedBatches}/${progress.totalBatches} complete${lastActiveModel ? ` (${lastActiveModel})` : ''}`);
-            // Check pause between batches — abort if paused
-            if (pausedRef.current) {
-              controller.abort();
-            }
-          },
-          resumeFrom,
+        const skipModels = new Set<string>();
+        const commonStreamOpts = {
+          onModelStart: (model: string) => { updateJob(jobId, { activeModel: model }); if (model !== lastActiveModel) { addLogEntry(jobId, fileName, 'info', `Using model: ${model}`); lastActiveModel = model; } },
+          onStreamProgress: (phase: 'uploading' | 'processing' | 'streaming', charsReceived: number) => { updateJob(jobId, { streamPhase: phase, streamChars: charsReceived }); },
+          onError: (model: string, reason: string, action: string) => { updateJob(jobId, { errorDetail: `${model}: ${reason} (${action})` }); addLogEntry(jobId, fileName, 'error', `${model}: ${reason} (${action})`); },
           abortSignal: controller.signal,
-          translationLanguage: nextJob.translationLanguage,
-        });
+          skipModels,
+        };
+
+        if (nextJob.sourceMarkdown) {
+          // ── Markdown-based translation (from history) ───────────────────
+          addLogEntry(jobId, fileName, 'info', `Translating to ${nextJob.translationLanguage}`);
+          updateJob(jobId, { status: 'converting', phase: 'converting', statusMessage: `Translating to ${nextJob.translationLanguage}...`, startedAt: Date.now() });
+
+          markdown = await translateMarkdown(nextJob.sourceMarkdown, nextJob.translationLanguage!, {
+            ...commonStreamOpts,
+            onProgress: ({ currentChunk, totalChunks, statusMessage }) => {
+              updateJob(jobId, { currentBatch: currentChunk, totalBatches: totalChunks, statusMessage, progress: Math.round((currentChunk / totalChunks) * 100) });
+              addLogEntry(jobId, fileName, 'info', statusMessage);
+            },
+            onRetry: (attempt, delay, reason) => {
+              const msg = reason === 'rate_limited' ? `Rate limited \u2014 retrying in ${delay}s...` : `Retrying in ${delay}s (attempt ${attempt})...`;
+              updateJob(jobId, { statusMessage: msg });
+            },
+            onModelSkip: (skippedModel, nextModel, reason) => {
+              const msg = nextModel ? `Skipping ${skippedModel} (${reason}), trying ${nextModel}...` : `Skipping ${skippedModel} (${reason}), no more models`;
+              updateJob(jobId, { statusMessage: msg });
+            },
+          });
+        } else {
+          // ── Normal PDF conversion ───────────────────────────────────────
+          // Reconstruct File object if rehydrated
+          let fileObj = nextJob.file;
+          if (!fileObj || !(fileObj instanceof File) || fileObj.size === 0) {
+            if (!nextJob.sourcePath) throw new Error('Source PDF path not available');
+            const buffer = await window.electronAPI!.readPdf(nextJob.sourcePath);
+            fileObj = new File([buffer], nextJob.fileName, { type: 'application/pdf' });
+          }
+
+          // Load partial progress for resume
+          let resumeFrom = undefined;
+          if (nextJob.resumeFrom && nextJob.resumeFrom > 0) {
+            resumeFrom = (await window.electronAPI?.loadProgress(jobId)) ?? undefined;
+          }
+
+          addLogEntry(jobId, fileName, 'info', `Started converting ${fileName}`);
+
+          markdown = await convertFile({
+            file: fileObj,
+            jobId,
+            sourcePath: nextJob.sourcePath || '',
+            onProgress: update => {
+              updateJob(jobId, update);
+              if (update.activeModel && update.activeModel !== lastActiveModel) {
+                addLogEntry(jobId, fileName, 'info', `Using model: ${update.activeModel}`);
+              }
+              if (update.activeModel) lastActiveModel = update.activeModel;
+              if (update.statusMessage?.startsWith('Scanning document')) {
+                addLogEntry(jobId, fileName, 'info', 'Scanning document structure...');
+              }
+              if (update.statusMessage?.startsWith('Structure scan complete')) {
+                addLogEntry(jobId, fileName, 'success', update.statusMessage);
+              }
+              if (update.errorDetail) {
+                addLogEntry(jobId, fileName, 'error', update.errorDetail);
+              }
+            },
+            onBatchComplete: async (progress) => {
+              await window.electronAPI?.saveProgress(progress);
+              addLogEntry(jobId, fileName, 'info', `Batch ${progress.completedBatches}/${progress.totalBatches} complete${lastActiveModel ? ` (${lastActiveModel})` : ''}`);
+              if (pausedRef.current) {
+                controller.abort();
+              }
+            },
+            resumeFrom,
+            abortSignal: controller.signal,
+            translationLanguage: nextJob.translationLanguage,
+          });
+        }
 
         // Clean up progress file
         await window.electronAPI?.deleteProgress(jobId);
@@ -568,6 +599,62 @@ export default function App() {
     setTimeout(processQueue, 50);
   }, [processQueue]);
 
+  // Translate from existing markdown in history
+  const translateFromHistory = useCallback(async (entry: HistoryEntry, language: string) => {
+    if (!window.electronAPI) return;
+
+    // Load existing markdown
+    let md = await window.electronAPI.readMarkdown(entry.savedPath);
+    if (!md) md = await window.electronAPI.loadInternalMarkdown(entry.id) ?? null;
+    if (!md) {
+      const errorJob: ConversionJob = {
+        id: crypto.randomUUID(),
+        file: null as any,
+        fileName: entry.fileName,
+        sourcePath: entry.sourcePath,
+        savedPath: null,
+        status: 'error',
+        phase: 'scanning',
+        progress: 0,
+        currentBatch: 0,
+        totalBatches: 0,
+        totalPages: entry.totalPages,
+        statusMessage: 'Error',
+        markdown: null,
+        error: `Markdown file not found for translation. Re-transcribe first.`,
+        startedAt: null,
+        completedAt: Date.now(),
+      };
+      setJobs(prev => [...prev, errorJob]);
+      setSidebarTab('queue');
+      return;
+    }
+
+    const job: ConversionJob = {
+      id: crypto.randomUUID(),
+      file: null as any,
+      fileName: entry.fileName,
+      sourcePath: entry.sourcePath,
+      savedPath: null,
+      status: 'queued',
+      phase: 'converting',
+      progress: 0,
+      currentBatch: 0,
+      totalBatches: 0,
+      totalPages: entry.totalPages,
+      statusMessage: `Queued (translate to ${language})`,
+      markdown: null,
+      error: null,
+      startedAt: null,
+      completedAt: null,
+      sourceMarkdown: md,
+      translationLanguage: language,
+    };
+    setJobs(prev => [...prev, job]);
+    setSidebarTab('queue');
+    setTimeout(processQueue, 50);
+  }, [processQueue]);
+
   // F13: Reorder queue (drag-and-drop)
   const reorderJobs = useCallback((activeId: string, overId: string) => {
     setJobs(prev => {
@@ -696,6 +783,7 @@ export default function App() {
                     onDelete={deleteHistoryItem}
                     onClearAll={clearHistory}
                     onReconvert={reconvertFromHistory}
+                    onTranslate={translateFromHistory}
                     onExport={handleExportHistory}
                   />
                 ) : (

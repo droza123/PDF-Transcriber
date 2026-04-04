@@ -21,6 +21,7 @@ export interface ConversionJob {
   translationLanguage?: string;
   startedAt: number | null;
   completedAt: number | null;
+  sourceMarkdown?: string; // when set, translate this text instead of processing PDF
   resumeFrom?: number; // batch number to resume from (set during rehydration)
   previousConversion?: { date: number }; // set if this file was already converted before
 }

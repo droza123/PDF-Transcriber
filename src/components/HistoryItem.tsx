@@ -1,5 +1,7 @@
-import { Eye, FolderOpen, Trash2, FileText, RefreshCw } from 'lucide-react';
+import { useState } from 'react';
+import { Eye, FolderOpen, Trash2, FileText, RefreshCw, Languages } from 'lucide-react';
 import type { HistoryEntry } from '../types';
+import { getSettings } from '../lib/settings';
 
 interface HistoryItemProps {
   entry: HistoryEntry;
@@ -8,6 +10,7 @@ interface HistoryItemProps {
   onShowInFolder: (entry: HistoryEntry) => void;
   onDelete: (id: string) => void;
   onReconvert: (entry: HistoryEntry) => void;
+  onTranslate?: (entry: HistoryEntry, language: string) => void;
 }
 
 function formatDate(ts: number): string {
@@ -29,7 +32,10 @@ function formatDuration(ms: number): string {
   return `${m}m ${s % 60}s`;
 }
 
-export default function HistoryItem({ entry, isActive, onPreview, onShowInFolder, onDelete, onReconvert }: HistoryItemProps) {
+export default function HistoryItem({ entry, isActive, onPreview, onShowInFolder, onDelete, onReconvert, onTranslate }: HistoryItemProps) {
+  const [showLangPicker, setShowLangPicker] = useState(false);
+  const isTranscription = !entry.translationLanguage;
+
   return (
     <div
       className={`
@@ -47,7 +53,28 @@ export default function HistoryItem({ entry, isActive, onPreview, onShowInFolder
           {entry.totalPages} pages
           {' \u00b7 '}
           {formatDuration(entry.durationMs)}
+          {entry.translationLanguage && (
+            <span className="text-sky-400"> \u00b7 \u2192 {entry.translationLanguage}</span>
+          )}
         </p>
+
+        {/* Language picker dropdown */}
+        {showLangPicker && (
+          <div className="mt-1.5 flex flex-wrap gap-1">
+            {getSettings().translationLanguages.map(lang => (
+              <button
+                key={lang}
+                onClick={() => {
+                  setShowLangPicker(false);
+                  onTranslate?.(entry, lang);
+                }}
+                className="px-2 py-0.5 text-[10px] rounded-full bg-sky-400/10 text-sky-400 hover:bg-sky-400/20 tab-transition"
+              >
+                {lang}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="flex items-center gap-1 shrink-0">
@@ -58,6 +85,20 @@ export default function HistoryItem({ entry, isActive, onPreview, onShowInFolder
         >
           <Eye className="w-3.5 h-3.5" />
         </button>
+        {/* Translate button — only for transcriptions (not already-translated entries) */}
+        {isTranscription && onTranslate && (
+          <button
+            onClick={() => setShowLangPicker(!showLangPicker)}
+            className={`p-1.5 rounded tab-transition ${
+              showLangPicker
+                ? 'text-sky-400 bg-sky-400/10'
+                : 'text-p-text-dim hover:text-sky-400 hover:bg-p-surface-hover'
+            }`}
+            title="Translate from this transcription"
+          >
+            <Languages className="w-3.5 h-3.5" />
+          </button>
+        )}
         <button
           onClick={() => onReconvert(entry)}
           className="p-1.5 rounded text-p-text-dim hover:text-p-accent hover:bg-p-surface-hover tab-transition"

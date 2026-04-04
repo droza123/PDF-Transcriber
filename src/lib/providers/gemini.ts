@@ -126,6 +126,30 @@ export class GeminiProvider implements Provider {
     return { text, modelUsed: model };
   }
 
+  async callText(options: ProviderCallOptions): Promise<ProviderResult> {
+    const { model, prompt, abortSignal, onStreamProgress } = options;
+    const key = this._getKey();
+    const ai = new GoogleGenAI({ apiKey: key });
+
+    if (abortSignal?.aborted) throw new DOMException('Cancelled', 'AbortError');
+    onStreamProgress?.('streaming', 0);
+
+    const stream = await ai.models.generateContentStream({
+      model,
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      config: { maxOutputTokens: 65536 },
+    });
+
+    let text = '';
+    for await (const chunk of stream) {
+      if (abortSignal?.aborted) throw new DOMException('Cancelled', 'AbortError');
+      text += chunk.text || '';
+      onStreamProgress?.('streaming', text.length);
+    }
+
+    return { text, modelUsed: model };
+  }
+
   isRateLimitError(error: any): boolean {
     return (
       error?.status === 429 ||

@@ -167,6 +167,74 @@ export class AnthropicProvider implements Provider {
     return { text, modelUsed: model };
   }
 
+  async callText(options: ProviderCallOptions): Promise<ProviderResult> {
+    const { model, prompt, maxOutputTokens, abortSignal, onStreamProgress } = options;
+    const key = this._getKey();
+
+    if (abortSignal?.aborted) throw new DOMException('Cancelled', 'AbortError');
+    onStreamProgress?.('streaming', 0);
+
+    const res = await fetch(`${API_BASE}/v1/messages`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': key,
+        'anthropic-version': API_VERSION,
+        'anthropic-dangerous-direct-browser-access': 'true',
+      },
+      body: JSON.stringify({
+        model,
+        max_tokens: maxOutputTokens,
+        stream: true,
+        messages: [{ role: 'user', content: prompt }],
+      }),
+      signal: abortSignal,
+    });
+
+    if (!res.ok) {
+      const errorData = await res.json().catch(() => ({}));
+      const error: any = new Error(errorData?.error?.message || `HTTP ${res.status}`);
+      error.status = res.status;
+      throw error;
+    }
+
+    const reader = res.body!.getReader();
+    const decoder = new TextDecoder();
+    let text = '';
+    let buffer = '';
+
+    while (true) {
+      if (abortSignal?.aborted) throw new DOMException('Cancelled', 'AbortError');
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const data = line.slice(6);
+        if (data === '[DONE]') continue;
+        try {
+          const event = JSON.parse(data);
+          if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
+            text += event.delta.text;
+            onStreamProgress?.('streaming', text.length);
+          }
+          if (event.type === 'error') {
+            const error: any = new Error(event.error?.message || 'Stream error');
+            error.status = event.error?.type === 'rate_limit_error' ? 429 : 500;
+            throw error;
+          }
+        } catch (e) {
+          if (e instanceof SyntaxError) continue;
+          throw e;
+        }
+      }
+    }
+
+    return { text, modelUsed: model };
+  }
+
   isRateLimitError(error: any): boolean {
     return (
       error?.status === 429 ||

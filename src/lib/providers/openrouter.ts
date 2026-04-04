@@ -220,6 +220,76 @@ export class OpenRouterProvider implements Provider {
     return { text, modelUsed: model };
   }
 
+  async callText(options: ProviderCallOptions): Promise<ProviderResult> {
+    const { model, prompt, maxOutputTokens, abortSignal, onStreamProgress } = options;
+    const key = this._getKey();
+
+    if (abortSignal?.aborted) throw new DOMException('Cancelled', 'AbortError');
+    onStreamProgress?.('streaming', 0);
+
+    const res = await fetch(`${API_BASE}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${key}`,
+        'HTTP-Referer': 'http://localhost:3001/',
+        'X-Title': 'PDF Transcriber',
+      },
+      body: JSON.stringify({
+        model,
+        max_tokens: maxOutputTokens,
+        stream: true,
+        messages: [{ role: 'user', content: prompt }],
+      }),
+      signal: abortSignal,
+    });
+
+    if (!res.ok) {
+      const errorData = await res.json().catch(() => ({}));
+      const error: any = new Error(errorData?.error?.message || `HTTP ${res.status}`);
+      error.status = res.status;
+      error.code = errorData?.error?.code;
+      throw error;
+    }
+
+    const reader = res.body!.getReader();
+    const decoder = new TextDecoder();
+    let text = '';
+    let buffer = '';
+
+    while (true) {
+      if (abortSignal?.aborted) throw new DOMException('Cancelled', 'AbortError');
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const data = line.slice(6).trim();
+        if (data === '[DONE]') continue;
+        try {
+          const event = JSON.parse(data);
+          if (event.error) {
+            const error: any = new Error(event.error.message || 'Stream error');
+            error.status = event.error.code || 500;
+            throw error;
+          }
+          const delta = event.choices?.[0]?.delta?.content;
+          if (delta) {
+            text += delta;
+            onStreamProgress?.('streaming', text.length);
+          }
+        } catch (e) {
+          if (e instanceof SyntaxError) continue;
+          throw e;
+        }
+      }
+    }
+
+    return { text, modelUsed: model };
+  }
+
   isRateLimitError(error: any): boolean {
     return (
       error?.status === 429 ||

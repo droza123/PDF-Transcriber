@@ -13,6 +13,7 @@ interface HistoryProps {
   onDelete: (id: string) => void;
   onClearAll: () => void;
   onReconvert: (entry: HistoryEntry) => void;
+  onTranslate: (entry: HistoryEntry, language: string) => void;
   onExport: () => void;
 }
 
@@ -26,6 +27,7 @@ export default function History({
   onDelete,
   onClearAll,
   onReconvert,
+  onTranslate,
   onExport,
 }: HistoryProps) {
   const [confirmClear, setConfirmClear] = useState(false);
@@ -105,6 +107,7 @@ export default function History({
               onShowInFolder={onShowInFolder}
               onDelete={onDelete}
               onReconvert={onReconvert}
+              onTranslate={onTranslate}
             />
           ))}
         </div>

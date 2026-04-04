@@ -3,7 +3,7 @@
  * The actual provider logic is in providers/gemini.ts; the retry/fallback
  * orchestration is in providers/orchestrator.ts.
  */
-import { callWithRetry, type OrchestratorCallOptions } from './providers/orchestrator';
+import { callWithRetry, callTextWithRetry, type OrchestratorCallOptions } from './providers/orchestrator';
 import type { ProviderResult } from './providers/types';
 import { getSettings } from './settings';
 import { getActiveProvider } from './providers/registry';
@@ -40,7 +40,8 @@ function buildBatchPrompt(batchNum: number, totalBatches: number, outline: strin
 - Translate ALL document content into ${translationLanguage}.
 - The structural outline above is in the original language — use it to match heading levels, but translate the heading text into ${translationLanguage}.
 - Translate footnote and endnote text into ${translationLanguage}.
-- Keep bibliographic references (titles, authors, publishers, journal names) in their original language.`
+- Keep bibliographic references (titles, authors, publishers, journal names) in their original language.
+- Passages that are in a foreign language in the original (e.g., Greek, Latin, Hebrew quotes embedded in the text) should NOT be translated — preserve them exactly as written. These are intentionally in a different language.`
     : '';
 
   return `Convert this PDF to Markdown optimized for AI-assisted academic citation.
@@ -116,4 +117,134 @@ export async function convertPdfBatchToMarkdown(
 export function batchDelay(): Promise<void> {
   const provider = getActiveProvider();
   return new Promise(resolve => setTimeout(resolve, provider.batchDelayMs));
+}
+
+// ── Markdown translation ────────────────────────────────────────────────────
+
+const TARGET_CHUNK_WORDS = 5000;
+
+/**
+ * Split markdown into chunks on heading or paragraph boundaries.
+ * Returns an array of markdown strings, each roughly TARGET_CHUNK_WORDS words.
+ */
+function chunkMarkdown(markdown: string): string[] {
+  // Split into sections on top-level headings (# or ##)
+  const sections: string[] = [];
+  let current = '';
+  for (const line of markdown.split('\n')) {
+    if (/^#{1,2}\s/.test(line) && current.trim()) {
+      sections.push(current);
+      current = '';
+    }
+    current += line + '\n';
+  }
+  if (current.trim()) sections.push(current);
+
+  // Merge small sections and split large ones to hit target size
+  const chunks: string[] = [];
+  let buffer = '';
+  for (const section of sections) {
+    const bufferWords = buffer.split(/\s+/).length;
+    const sectionWords = section.split(/\s+/).length;
+
+    if (bufferWords + sectionWords <= TARGET_CHUNK_WORDS * 1.3) {
+      buffer += section;
+    } else {
+      if (buffer.trim()) chunks.push(buffer.trim());
+      // If a single section is too large, split on paragraph boundaries
+      if (sectionWords > TARGET_CHUNK_WORDS * 1.3) {
+        const paragraphs = section.split(/\n\n+/);
+        let paraBuffer = '';
+        for (const para of paragraphs) {
+          if (paraBuffer.split(/\s+/).length + para.split(/\s+/).length > TARGET_CHUNK_WORDS * 1.3 && paraBuffer.trim()) {
+            chunks.push(paraBuffer.trim());
+            paraBuffer = '';
+          }
+          paraBuffer += para + '\n\n';
+        }
+        buffer = paraBuffer;
+      } else {
+        buffer = section;
+      }
+    }
+  }
+  if (buffer.trim()) chunks.push(buffer.trim());
+
+  return chunks.length > 0 ? chunks : [markdown];
+}
+
+function buildTranslationPrompt(chunk: string, chunkNum: number, totalChunks: number, targetLanguage: string): string {
+  const settings = getSettings();
+  const extra = settings.outputNotes ? `\n\nCustom instructions:\n${settings.outputNotes}` : '';
+
+  return `Translate the following Markdown into ${targetLanguage}.
+${totalChunks > 1 ? `This is chunk ${chunkNum} of ${totalChunks} from the source document.\n` : ''}
+Rules:
+- Preserve all Markdown formatting, heading levels, footnotes [^N], tables, page markers (<!-- page: N -->), and block quotes exactly.
+- Keep bibliographic references (titles, authors, publishers, journal names) in their original language.
+- Passages that are in a foreign language in the original (e.g., Greek, Latin, Hebrew quotes) should NOT be translated — preserve them exactly as written. These are intentionally in a different language.
+- Output only the translated Markdown — no commentary.${extra}
+
+---
+
+${chunk}`;
+}
+
+export interface TranslateMarkdownOptions {
+  onProgress?: (update: { currentChunk: number; totalChunks: number; statusMessage: string }) => void;
+  onRetry?: (attempt: number, delaySec: number, reason?: string) => void;
+  onModelSkip?: (skippedModel: string, nextModel: string | null, reason: string) => void;
+  onModelStart?: (model: string) => void;
+  onStreamProgress?: (phase: 'uploading' | 'processing' | 'streaming', charsReceived: number) => void;
+  onError?: (model: string, reason: string, action: string) => void;
+  abortSignal?: AbortSignal;
+  skipModels?: Set<string>;
+}
+
+/** Translate markdown text into a target language, chunked for long documents. */
+export async function translateMarkdown(
+  markdown: string,
+  targetLanguage: string,
+  options: TranslateMarkdownOptions = {},
+): Promise<string> {
+  const { onProgress, onRetry, onModelSkip, onModelStart, onStreamProgress, onError, abortSignal, skipModels } = options;
+
+  const chunks = chunkMarkdown(markdown);
+  const totalChunks = chunks.length;
+  const results: string[] = [];
+
+  console.log(`[translate] Translating ${totalChunks} chunk(s) to ${targetLanguage}`);
+
+  for (let i = 0; i < totalChunks; i++) {
+    if (abortSignal?.aborted) throw new DOMException('Cancelled', 'AbortError');
+
+    const chunkNum = i + 1;
+    onProgress?.({
+      currentChunk: chunkNum,
+      totalChunks,
+      statusMessage: `Translating chunk ${chunkNum}/${totalChunks}...`,
+    });
+
+    const prompt = buildTranslationPrompt(chunks[i], chunkNum, totalChunks, targetLanguage);
+    const result = await callTextWithRetry(prompt, {
+      onRetry, onModelSkip, onModelStart, onStreamProgress, onError, abortSignal, skipModels,
+    });
+
+    // Strip code fences the model may wrap output in
+    let text = result.text.trim();
+    if (text.startsWith('```markdown')) text = text.slice('```markdown'.length);
+    else if (text.startsWith('```md')) text = text.slice('```md'.length);
+    else if (text.startsWith('```')) text = text.slice(3);
+    if (text.endsWith('```')) text = text.slice(0, -3);
+    results.push(text.trim());
+
+    onStreamProgress?.('streaming', 0); // reset for next chunk
+
+    if (i < totalChunks - 1) {
+      await batchDelay();
+    }
+  }
+
+  console.log(`[translate] Translation complete (${totalChunks} chunks)`);
+  return results.join('\n\n');
 }
