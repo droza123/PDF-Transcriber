@@ -1,5 +1,4 @@
 import type { Provider, ProviderCallOptions, ProviderModel, ProviderResult } from './types';
-import { pdfBlobToBase64Images } from './pdfToImages';
 
 const API_BASE = 'https://openrouter.ai/api/v1';
 const MODELS_CACHE_KEY = 'openrouter_models_cache';
@@ -51,19 +50,18 @@ export class OpenRouterProvider implements Provider {
       const data = await res.json();
       const rawModels: OpenRouterModelData[] = data.data || [];
 
-      // Filter to models that accept image input and produce text-only output.
+      // Filter to models that produce text-only output.
+      // OpenRouter handles PDF input for all models via its file-parser plugin,
+      // so we don't need to require image/vision capability on the input side.
       // Modality format is "input_types->output_types", e.g. "text+image->text".
-      // Exclude models that output audio (Lyria), images (generators), etc.
-      const visionModels = rawModels.filter(m => {
+      const textOutputModels = rawModels.filter(m => {
         const modality = m.architecture?.modality || '';
-        const [inputSide, outputSide] = modality.split('->');
-        if (!inputSide || !outputSide) return false;
-        const acceptsImages = inputSide.includes('image');
-        const outputsTextOnly = outputSide.trim() === 'text';
-        return acceptsImages && outputsTextOnly;
+        const [, outputSide] = modality.split('->');
+        if (!outputSide) return false;
+        return outputSide.trim() === 'text';
       });
 
-      const models: ProviderModel[] = visionModels.map(m => {
+      const models: ProviderModel[] = textOutputModels.map(m => {
         const promptPrice = parseFloat(m.pricing?.prompt || '0');
         const completionPrice = parseFloat(m.pricing?.completion || '0');
         const isFree = promptPrice === 0 && completionPrice === 0;
@@ -117,25 +115,30 @@ export class OpenRouterProvider implements Provider {
 
     onStreamProgress?.('uploading', 0);
 
-    // Convert PDF pages to images
-    console.log(`[openrouter] Converting ${(pdfBlob.size / 1024 / 1024).toFixed(1)} MB PDF to images`);
-    const images = await pdfBlobToBase64Images(pdfBlob);
-    console.log(`[openrouter] Rendered ${images.length} page(s) as JPEG`);
+    // Encode PDF as base64 and send directly — OpenRouter handles PDF parsing
+    // for all models via its file-parser plugin (no image conversion needed).
+    const arrayBuffer = await pdfBlob.arrayBuffer();
+    const bytes = new Uint8Array(arrayBuffer);
+    let binary = '';
+    for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+    const base64 = btoa(binary);
 
     if (abortSignal?.aborted) throw new DOMException('Cancelled', 'AbortError');
 
+    const sizeMB = (pdfBlob.size / 1024 / 1024).toFixed(1);
+    console.log(`[openrouter] Sending ${sizeMB} MB PDF as base64 to ${model}`);
     onStreamProgress?.('streaming', 0);
 
-    // Build content array: images first, then prompt
-    const content: any[] = images.map(img => ({
-      type: 'image_url',
-      image_url: {
-        url: `data:${img.mimeType};base64,${img.base64}`,
+    const content: any[] = [
+      {
+        type: 'file',
+        file: {
+          filename: 'document.pdf',
+          file_data: `data:application/pdf;base64,${base64}`,
+        },
       },
-    }));
-    content.push({ type: 'text', text: prompt });
-
-    console.log(`[openrouter] Sending to ${model} (${images.length} images)`);
+      { type: 'text', text: prompt },
+    ];
 
     const res = await fetch(`${API_BASE}/chat/completions`, {
       method: 'POST',
