@@ -8,11 +8,9 @@ if (typeof (Uint8Array.prototype as any).toHex !== 'function') {
   };
 }
 
-// Use the bundled worker
-pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-  'pdfjs-dist/build/pdf.worker.min.mjs',
-  import.meta.url,
-).toString();
+// Disable the Web Worker so pdfjs-dist runs in the main thread where our
+// polyfill is active. The worker has its own scope and can't see the polyfill.
+pdfjsLib.GlobalWorkerOptions.workerSrc = '';
 
 export interface PdfImage {
   base64: string;
