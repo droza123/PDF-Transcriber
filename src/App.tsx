@@ -8,6 +8,7 @@ import { translateMarkdown } from './lib/gemini';
 import { canSaveToSource, runAutoExport, exportHistoryAsCsv } from './lib/download';
 import { getSettings, saveSettings, addSessionSkippedModel } from './lib/settings';
 import { getProvider } from './lib/providers/registry';
+import type { ProviderId } from './lib/providers/types';
 import { OpenRouterProvider } from './lib/providers/openrouter';
 import Header from './components/Header';
 import Welcome from './components/Welcome';
@@ -32,7 +33,7 @@ export default function App() {
   const [historyMarkdown, setHistoryMarkdown] = useState<string | null>(null);
   const [historySearch, setHistorySearch] = useState('');
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [settingsInitialProvider, setSettingsInitialProvider] = useState<'gemini' | 'openrouter' | 'anthropic' | null>(null);
+  const [settingsInitialProvider, setSettingsInitialProvider] = useState<ProviderId | null>(null);
   const [paused, setPaused] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(() =>

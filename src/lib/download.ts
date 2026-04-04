@@ -142,6 +142,76 @@ export function exportHistoryAsCsv(entries: HistoryEntry[]): void {
   );
 }
 
+// ── JSON export ─────────────────────────────────────────────────────────────
+
+/** Build a structured JSON string from markdown content. */
+export function buildJsonExport(markdownContent: string): string {
+  // Extract YAML frontmatter
+  const metadata: Record<string, string | number> = {};
+  let body = markdownContent;
+  const fmMatch = markdownContent.match(/^---\n([\s\S]*?)\n---\n?/);
+  if (fmMatch) {
+    for (const line of fmMatch[1].split('\n')) {
+      const idx = line.indexOf(': ');
+      if (idx === -1) continue;
+      const key = line.slice(0, idx).trim();
+      let val: string | number = line.slice(idx + 2).trim();
+      // Unquote strings
+      if (val.startsWith('"') && val.endsWith('"')) val = val.slice(1, -1);
+      // Parse numbers
+      const num = Number(val);
+      if (!isNaN(num) && val !== '') val = num;
+      metadata[key] = val;
+    }
+    body = markdownContent.slice(fmMatch[0].length);
+  }
+
+  // Extract outline section
+  let outline: string | null = null;
+  const outlineMatch = body.match(/<!--\s*Document Outline\s*-->\n\n([\s\S]*?)\n\n---\n/);
+  if (outlineMatch) {
+    outline = outlineMatch[1].trim();
+    body = body.slice(0, outlineMatch.index!) + body.slice(outlineMatch.index! + outlineMatch[0].length);
+  }
+
+  // Split body into sections by headings
+  const sections: { level: number; heading: string | null; content: string }[] = [];
+  const headingRegex = /^(#{1,6})\s+(.+)$/gm;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = headingRegex.exec(body)) !== null) {
+    // Content before this heading
+    const contentBefore = body.slice(lastIndex, match.index).trim();
+    if (lastIndex === 0 && contentBefore) {
+      sections.push({ level: 0, heading: null, content: contentBefore });
+    } else if (sections.length > 0 && contentBefore) {
+      sections[sections.length - 1].content = contentBefore;
+    }
+    sections.push({ level: match[1].length, heading: match[2], content: '' });
+    lastIndex = match.index + match[0].length;
+  }
+
+  // Remaining content after last heading
+  const remaining = body.slice(lastIndex).trim();
+  if (sections.length > 0 && remaining) {
+    sections[sections.length - 1].content = remaining;
+  } else if (sections.length === 0 && remaining) {
+    sections.push({ level: 0, heading: null, content: remaining });
+  }
+
+  return JSON.stringify({ metadata, outline, sections }, null, 2);
+}
+
+/** Export markdown as a JSON file. */
+export function exportAsJson(fileName: string, markdownContent: string): void {
+  const json = buildJsonExport(markdownContent);
+  downloadBlob(
+    new Blob([json], { type: 'application/json;charset=utf-8' }),
+    fileName.replace(/\.pdf$/i, '.json'),
+  );
+}
+
 /** Export markdown as a formatted HTML file. */
 export async function exportAsHtml(fileName: string, markdownContent: string): Promise<void> {
   const title = fileName.replace(/\.pdf$/i, '');
@@ -224,6 +294,11 @@ export async function runAutoExport(
           const title = fileName.replace(/\.pdf$/i, '');
           const html = await renderMarkdownToHtml(markdown, title);
           await api.saveFile(outPath, html, 'html', unique);
+          break;
+        }
+        case 'json': {
+          const json = buildJsonExport(markdown);
+          await api.saveFile(outPath, json, 'json', unique);
           break;
         }
         case 'docx': {

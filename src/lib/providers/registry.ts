@@ -2,12 +2,16 @@ import type { Provider, ProviderId } from './types';
 import { GeminiProvider } from './gemini';
 import { AnthropicProvider } from './anthropic';
 import { OpenRouterProvider } from './openrouter';
+import { OpenAIProvider } from './openai';
+import { CustomProvider } from './custom';
 import { getSettings } from '../settings';
 
 const providers: Record<ProviderId, Provider> = {
   gemini: new GeminiProvider(),
   anthropic: new AnthropicProvider(),
   openrouter: new OpenRouterProvider(),
+  openai: new OpenAIProvider(),
+  custom: new CustomProvider(),
 };
 
 export function getProvider(id: ProviderId): Provider {

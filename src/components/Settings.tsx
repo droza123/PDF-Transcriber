@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { X, Save, GripVertical, RefreshCw, Info, Eye, EyeOff, Trash2, ExternalLink, Loader2, CheckCircle2, AlertTriangle, Cpu, FileOutput, SlidersHorizontal } from 'lucide-react';
+import { X, GripVertical, RefreshCw, Info, Eye, EyeOff, Trash2, ExternalLink, Loader2, CheckCircle2, AlertTriangle, Cpu, FileOutput, SlidersHorizontal } from 'lucide-react';
 import { DndContext, closestCenter, type DragEndEvent } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -139,6 +139,10 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
   const [freeOnlyFilter, setFreeOnlyFilter] = useState(true);
   const [openrouterModelData, setOpenrouterModelData] = useState<ProviderModel[]>([]);
   const [exportTranscription, setExportTranscription] = useState(true);
+  // Custom provider config
+  const [customBaseUrl, setCustomBaseUrl] = useState('');
+  const [customModels, setCustomModels] = useState<string[]>([]);
+  const [newCustomModel, setNewCustomModel] = useState('');
 
   useEffect(() => {
     if (open) {
@@ -160,6 +164,8 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
       setAutoFreeModels(s.openrouterAutoFreeModels);
       setExportTranscription(s.exportTranscriptionWithTranslation);
       setFreeOnlyFilter(true);
+      setCustomBaseUrl(s.customBaseUrl || 'http://localhost:11434/v1');
+      setCustomModels(s.customModels || []);
       // Reset key editing state
       setEditingKey(false);
       setKeyValue('');
@@ -190,10 +196,10 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
   }
 
   function handleProviderChange(id: ProviderId) {
-    // Save current model priority for the old provider before switching
+    // Save current model priority for the old provider and switch active provider
     const settings = getSettings();
     const updatedPriority = { ...settings.providerModelPriority, [selectedProvider]: modelPriority };
-    saveSettings({ providerModelPriority: updatedPriority });
+    saveSettings({ activeProvider: id, providerModelPriority: updatedPriority });
 
     setSelectedProvider(id);
     const newPriority = updatedPriority[id] || PROVIDER_DEFAULT_MODELS[id] || [];
@@ -212,10 +218,18 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
     } else {
       setOpenrouterModelData([]);
     }
+
+    // Load custom provider config
+    if (id === 'custom') {
+      const s = getSettings();
+      setCustomBaseUrl(s.customBaseUrl || 'http://localhost:11434/v1');
+      setCustomModels(s.customModels || []);
+    }
   }
 
   async function handleAutoFreeToggle(enabled: boolean) {
     setAutoFreeModels(enabled);
+    saveSettings({ openrouterAutoFreeModels: enabled });
     if (enabled && selectedProvider === 'openrouter') {
       const key = getApiKey('openrouter');
       if (!key) return;
@@ -226,6 +240,8 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
         setModelPriority(topFree);
         setOpenrouterModelData(orProvider._getCachedModels());
         setCachedModels(topFree);
+        const settings = getSettings();
+        saveSettings({ providerModelPriority: { ...settings.providerModelPriority, openrouter: topFree } });
       }
       setRefreshing(false);
     }
@@ -285,11 +301,16 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
 
   function toggleModel(model: string) {
     setModelPriority(prev => {
+      let next: string[];
       if (prev.includes(model)) {
         if (prev.length <= 1) return prev;
-        return prev.filter(m => m !== model);
+        next = prev.filter(m => m !== model);
+      } else {
+        next = [...prev, model];
       }
-      return [...prev, model];
+      const settings = getSettings();
+      saveSettings({ providerModelPriority: { ...settings.providerModelPriority, [selectedProvider]: next } });
+      return next;
     });
   }
 
@@ -303,17 +324,26 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
         const updated = [...prev];
         const [moved] = updated.splice(oldIndex, 1);
         updated.splice(newIndex, 0, moved);
+        const settings = getSettings();
+        saveSettings({ providerModelPriority: { ...settings.providerModelPriority, [selectedProvider]: updated } });
         return updated;
       });
     }
   }
 
-  const handleSave = () => {
-    const settings = getSettings();
-    const providerModelPriority = { ...settings.providerModelPriority, [selectedProvider]: modelPriority };
-    saveSettings({ activeProvider: selectedProvider, providerModelPriority, openrouterAutoFreeModels: autoFreeModels, batchSize, outputNotes, autoExportFormats, fileNaming, preventSleep, translationEnabled, translationLanguage, translationLanguages, exportTranscriptionWithTranslation: exportTranscription });
-    onClose();
-  };
+  // Debounce outputNotes saves
+  useEffect(() => {
+    if (!open) return;
+    const timer = setTimeout(() => saveSettings({ outputNotes }), 300);
+    return () => clearTimeout(timer);
+  }, [outputNotes]);
+
+  // Debounce customBaseUrl saves
+  useEffect(() => {
+    if (!open) return;
+    const timer = setTimeout(() => saveSettings({ customBaseUrl }), 300);
+    return () => clearTimeout(timer);
+  }, [customBaseUrl]);
 
   return (
     <div
@@ -405,6 +435,8 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
                 gemini: 'Generous free tier with fast models optimized for PDFs. Recommended starting point.',
                 openrouter: 'Access hundreds of models with one key. Many free models available \u2014 the app auto-selects the best ones.',
                 anthropic: 'Premium quality output with native PDF support. Requires a paid API key.',
+                openai: 'Direct access to OpenAI GPT and o-series models. Requires a paid API key.',
+                custom: 'Connect to any OpenAI-compatible API (Ollama, LM Studio, etc.). Configure the endpoint and models below.',
               };
               return (
                 <p className="text-xs text-p-text-dim mb-3">{descriptions[selectedProvider]}</p>
@@ -529,6 +561,99 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
             })()}
           </div>
 
+          {/* Custom provider config */}
+          {selectedProvider === 'custom' && (
+            <div className="section-divider space-y-3">
+              <div>
+                <label className="section-label block mb-1">Base URL</label>
+                <input
+                  type="text"
+                  value={customBaseUrl}
+                  onChange={e => setCustomBaseUrl(e.target.value)}
+                  placeholder="http://localhost:11434/v1"
+                  className="w-full input-base"
+                />
+                <p className="text-[10px] text-p-text-dim/60 mt-1">
+                  OpenAI-compatible endpoint (e.g. http://localhost:11434/v1 for Ollama)
+                </p>
+              </div>
+              <div>
+                <label className="section-label block mb-1">Model names</label>
+                <div className="rounded-lg border border-p-border bg-p-bg-deep overflow-y-auto max-h-28">
+                  {customModels.map(model => (
+                    <div key={model} className="flex items-center justify-between px-2 py-1.5 hover:bg-p-surface-hover">
+                      <span className="text-sm text-p-text truncate">{model}</span>
+                      <button
+                        onClick={() => {
+                          const next = customModels.filter(m => m !== model);
+                          setCustomModels(next);
+                          setModelPriority(prev => prev.filter(m => m !== model));
+                          const settings = getSettings();
+                          saveSettings({
+                            customModels: next,
+                            providerModelPriority: { ...settings.providerModelPriority, custom: next },
+                          });
+                        }}
+                        className="text-xs text-p-text-dim hover:text-p-error px-1"
+                        title="Remove model"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  ))}
+                  {customModels.length === 0 && (
+                    <p className="text-xs text-p-text-dim px-2 py-2">No models configured. Add model names below.</p>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 mt-2">
+                  <input
+                    type="text"
+                    value={newCustomModel}
+                    onChange={e => setNewCustomModel(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter' && newCustomModel.trim()) {
+                        const name = newCustomModel.trim();
+                        if (!customModels.includes(name)) {
+                          const next = [...customModels, name];
+                          setCustomModels(next);
+                          setModelPriority(next);
+                          const settings = getSettings();
+                          saveSettings({
+                            customModels: next,
+                            providerModelPriority: { ...settings.providerModelPriority, custom: next },
+                          });
+                        }
+                        setNewCustomModel('');
+                      }
+                    }}
+                    placeholder="Add a model name..."
+                    className="flex-1 input-base py-1.5"
+                  />
+                  <button
+                    onClick={() => {
+                      const name = newCustomModel.trim();
+                      if (name && !customModels.includes(name)) {
+                        const next = [...customModels, name];
+                        setCustomModels(next);
+                        setModelPriority(next);
+                        const settings = getSettings();
+                        saveSettings({
+                          customModels: next,
+                          providerModelPriority: { ...settings.providerModelPriority, custom: next },
+                        });
+                      }
+                      setNewCustomModel('');
+                    }}
+                    disabled={!newCustomModel.trim()}
+                    className="px-3 py-1.5 rounded-lg text-xs font-medium bg-p-accent/12 text-p-accent hover:bg-p-accent/20 disabled:opacity-30 tab-transition"
+                  >
+                    Add
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Model Priority */}
           <div className="section-divider">
             <div className="flex items-center justify-between mb-1">
@@ -649,7 +774,7 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
             <label className="section-label block mb-1.5">Batch size</label>
             <select
               value={batchSize}
-              onChange={(e) => setBatchSize(Number(e.target.value))}
+              onChange={(e) => { const n = Number(e.target.value); setBatchSize(n); saveSettings({ batchSize: n }); }}
               className="input-base"
             >
               {[1, 2, 3, 5, 10, 15, 20].map((n) => (
@@ -670,6 +795,7 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
               {([
                 ['md', 'Markdown (.md)'],
                 ['html', 'HTML (.html)'],
+                ['json', 'JSON (.json)'],
                 ['docx', 'Word (.docx)'],
                 ['docx-logos', 'Word \u2014 Logos/Verbum (.docx)'],
               ] as const).map(([fmt, label]) => {
@@ -682,11 +808,13 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
                       checked={checked}
                       disabled={isLast}
                       onChange={() => {
-                        setAutoExportFormats(prev =>
-                          prev.includes(fmt)
+                        setAutoExportFormats(prev => {
+                          const next = prev.includes(fmt)
                             ? prev.filter(f => f !== fmt)
-                            : [...prev, fmt],
-                        );
+                            : [...prev, fmt];
+                          saveSettings({ autoExportFormats: next });
+                          return next;
+                        });
                       }}
                       className="shrink-0 accent-p-accent"
                       title={isLast ? 'At least one format must be selected' : undefined}
@@ -700,7 +828,7 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
             <label className="section-label block mt-3 mb-1.5">If file already exists</label>
             <select
               value={fileNaming}
-              onChange={(e) => setFileNaming(e.target.value as FileNaming)}
+              onChange={(e) => { const v = e.target.value as FileNaming; setFileNaming(v); saveSettings({ fileNaming: v }); }}
               className="input-base"
             >
               <option value="overwrite">Overwrite existing file</option>
@@ -714,7 +842,7 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
               <input
                 type="checkbox"
                 checked={exportTranscription}
-                onChange={(e) => setExportTranscription(e.target.checked)}
+                onChange={(e) => { setExportTranscription(e.target.checked); saveSettings({ exportTranscriptionWithTranslation: e.target.checked }); }}
                 className="shrink-0 accent-p-accent"
               />
               <span className="text-sm text-p-text">Also export original transcription when translating</span>
@@ -734,7 +862,7 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
               <input
                 type="checkbox"
                 checked={preventSleep}
-                onChange={(e) => setPreventSleep(e.target.checked)}
+                onChange={(e) => { setPreventSleep(e.target.checked); saveSettings({ preventSleep: e.target.checked }); }}
                 className="shrink-0 accent-p-accent"
               />
               <span className="text-sm text-p-text">Prevent sleep during conversion</span>
@@ -767,7 +895,7 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
                 <div key={lang} className="flex items-center justify-between px-2 py-1.5 hover:bg-p-surface-hover">
                   <span className="text-sm text-p-text">{lang}</span>
                   <button
-                    onClick={() => setTranslationLanguages(prev => prev.filter(l => l !== lang))}
+                    onClick={() => setTranslationLanguages(prev => { const next = prev.filter(l => l !== lang); saveSettings({ translationLanguages: next }); return next; })}
                     className="text-xs text-p-text-dim hover:text-p-error px-1"
                     title="Remove language"
                   >
@@ -788,7 +916,7 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
                   if (e.key === 'Enter' && newLanguage.trim()) {
                     const lang = newLanguage.trim();
                     if (!translationLanguages.includes(lang)) {
-                      setTranslationLanguages(prev => [...prev, lang]);
+                      setTranslationLanguages(prev => { const next = [...prev, lang]; saveSettings({ translationLanguages: next }); return next; });
                     }
                     setNewLanguage('');
                   }
@@ -800,7 +928,7 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
                 onClick={() => {
                   const lang = newLanguage.trim();
                   if (lang && !translationLanguages.includes(lang)) {
-                    setTranslationLanguages(prev => [...prev, lang]);
+                    setTranslationLanguages(prev => { const next = [...prev, lang]; saveSettings({ translationLanguages: next }); return next; });
                   }
                   setNewLanguage('');
                 }}
@@ -811,7 +939,7 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
               </button>
               {translationLanguages.length !== DEFAULT_TRANSLATION_LANGUAGES.length && (
                 <button
-                  onClick={() => setTranslationLanguages([...DEFAULT_TRANSLATION_LANGUAGES])}
+                  onClick={() => { const next = [...DEFAULT_TRANSLATION_LANGUAGES]; setTranslationLanguages(next); saveSettings({ translationLanguages: next }); }}
                   className="px-3 py-1.5 rounded-lg text-xs text-p-text-dim hover:text-p-text hover:bg-p-surface-hover tab-transition"
                 >
                   Reset
@@ -822,21 +950,6 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
           </>}
         </div>
 
-        <div className="flex items-center justify-end gap-3 mt-6">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 rounded-lg text-sm text-p-text-muted hover:text-p-text hover:bg-p-surface-hover tab-transition"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleSave}
-            className="btn-primary"
-          >
-            <Save className="w-4 h-4" />
-            Save
-          </button>
-        </div>
       </div>
     </div>
   );

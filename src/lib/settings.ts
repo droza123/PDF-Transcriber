@@ -1,6 +1,6 @@
 import type { ProviderId } from './providers/types';
 
-export type ExportFormat = 'md' | 'html' | 'docx' | 'docx-logos';
+export type ExportFormat = 'md' | 'html' | 'json' | 'docx' | 'docx-logos';
 export type FileNaming = 'overwrite' | 'unique';
 
 export const DEFAULT_TRANSLATION_LANGUAGES = [
@@ -23,11 +23,19 @@ export const DEFAULT_ANTHROPIC_MODELS = [
 
 export const DEFAULT_OPENROUTER_MODELS: string[] = [];
 
+export const DEFAULT_OPENAI_MODELS = [
+  'gpt-5-mini',
+  'gpt-5.4-nano',
+  'gpt-5.4-mini',
+];
+
 /** Per-provider default model lists. */
 export const PROVIDER_DEFAULT_MODELS: Record<ProviderId, string[]> = {
   gemini: DEFAULT_GEMINI_MODELS,
   anthropic: DEFAULT_ANTHROPIC_MODELS,
   openrouter: DEFAULT_OPENROUTER_MODELS,
+  openai: DEFAULT_OPENAI_MODELS,
+  custom: [],
 };
 
 export interface AppSettings {
@@ -43,6 +51,8 @@ export interface AppSettings {
   translationLanguage: string;
   translationLanguages: string[];
   exportTranscriptionWithTranslation: boolean;
+  customBaseUrl: string;
+  customModels: string[];
 }
 
 const STORAGE_KEY = 'app_settings';
@@ -53,6 +63,8 @@ const DEFAULTS: AppSettings = {
     gemini: [...DEFAULT_GEMINI_MODELS],
     anthropic: [...DEFAULT_ANTHROPIC_MODELS],
     openrouter: [...DEFAULT_OPENROUTER_MODELS],
+    openai: [...DEFAULT_OPENAI_MODELS],
+    custom: [],
   },
   openrouterAutoFreeModels: true,
   batchSize: 5,
@@ -64,6 +76,8 @@ const DEFAULTS: AppSettings = {
   translationLanguage: '',
   translationLanguages: [...DEFAULT_TRANSLATION_LANGUAGES],
   exportTranscriptionWithTranslation: true,
+  customBaseUrl: 'http://localhost:11434/v1',
+  customModels: [],
 };
 
 export function getSettings(): AppSettings {
@@ -107,6 +121,12 @@ export function getSettings(): AppSettings {
       }
       if (!parsed.providerModelPriority.openrouter) {
         parsed.providerModelPriority.openrouter = [...DEFAULT_OPENROUTER_MODELS];
+      }
+      if (!parsed.providerModelPriority.openai) {
+        parsed.providerModelPriority.openai = [...DEFAULT_OPENAI_MODELS];
+      }
+      if (!parsed.providerModelPriority.custom) {
+        parsed.providerModelPriority.custom = [];
       }
     }
 
