@@ -46,6 +46,7 @@ export interface HistoryEntry {
   totalPages: number;
   convertedAt: number;
   durationMs: number;
+  translationLanguage?: string;
 }
 
 /** Intermediate progress saved after each batch. */

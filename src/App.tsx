@@ -138,9 +138,10 @@ export default function App() {
       // Auto-archive done jobs to history so they survive app close
       const doneJobs = jobs.filter(j => j.status === 'done' && j.savedPath && j.sourcePath);
       if (doneJobs.length > 0) {
-        const existingPaths = new Set(historyRef.current.map(h => h.sourcePath));
+        const hKey = (path: string, lang?: string) => lang ? `${path}::${lang}` : path;
+        const existingKeys = new Set(historyRef.current.map(h => hKey(h.sourcePath, h.translationLanguage)));
         const newEntries: HistoryEntry[] = doneJobs
-          .filter(j => !existingPaths.has(j.sourcePath!))
+          .filter(j => !existingKeys.has(hKey(j.sourcePath!, j.translationLanguage)))
           .map(j => ({
             id: j.id,
             fileName: j.fileName,
@@ -149,6 +150,7 @@ export default function App() {
             totalPages: j.totalPages,
             convertedAt: j.completedAt!,
             durationMs: (j.completedAt ?? 0) - (j.startedAt ?? 0),
+            translationLanguage: j.translationLanguage || undefined,
           }));
         if (newEntries.length > 0) {
           setHistory(prev => [...newEntries, ...prev].sort((a, b) => b.convertedAt - a.convertedAt));
@@ -303,7 +305,7 @@ export default function App() {
         let saveError = '';
         if (nextJob.sourcePath && canSaveToSource()) {
           try {
-            const result = await runAutoExport(nextJob.sourcePath, nextJob.fileName, markdown, jobId);
+            const result = await runAutoExport(nextJob.sourcePath, nextJob.fileName, markdown, jobId, nextJob.translationLanguage);
             savedPath = result.savedPath;
             if (result.errors.length > 0) {
               saveError = result.errors.join('; ');
@@ -389,16 +391,18 @@ export default function App() {
 
   // ── Actions ───────────────────────────────────────────────────────────────
 
-  // F2: Duplicate detection in addFiles
+  // F2: Duplicate detection in addFiles (composite key: sourcePath + translationLanguage)
   const addFiles = useCallback(
     (files: File[]) => {
       const { translationEnabled, translationLanguage } = getSettings();
       const transLang = translationEnabled && translationLanguage ? translationLanguage : undefined;
-      const historyMap = new Map(historyRef.current.map(h => [h.sourcePath, h]));
+      const historyKey = (path: string, lang?: string) => lang ? `${path}::${lang}` : path;
+      const historyMap = new Map(historyRef.current.map(h => [historyKey(h.sourcePath, h.translationLanguage), h]));
       const newJobs = files.map(f => {
         const job = createJob(f);
         if (transLang) job.translationLanguage = transLang;
-        const prev = job.sourcePath ? historyMap.get(job.sourcePath) : null;
+        const key = job.sourcePath ? historyKey(job.sourcePath, transLang) : null;
+        const prev = key ? historyMap.get(key) : null;
         if (prev) {
           job.previousConversion = { date: prev.convertedAt };
         }
@@ -456,6 +460,7 @@ export default function App() {
     setJobs(prev => {
       const doneJobs = prev.filter(j => j.status === 'done' && j.savedPath);
       if (doneJobs.length > 0) {
+        const hKey = (path: string, lang?: string) => lang ? `${path}::${lang}` : path;
         const newEntries: HistoryEntry[] = doneJobs.map(j => ({
           id: j.id,
           fileName: j.fileName,
@@ -464,11 +469,12 @@ export default function App() {
           totalPages: j.totalPages,
           convertedAt: j.completedAt!,
           durationMs: (j.completedAt ?? 0) - (j.startedAt ?? 0),
+          translationLanguage: j.translationLanguage || undefined,
         }));
 
         setHistory(prevHistory => {
-          const sourceMap = new Map(prevHistory.map(h => [h.sourcePath, h]));
-          for (const entry of newEntries) sourceMap.set(entry.sourcePath, entry);
+          const sourceMap = new Map(prevHistory.map(h => [hKey(h.sourcePath, h.translationLanguage), h]));
+          for (const entry of newEntries) sourceMap.set(hKey(entry.sourcePath, entry.translationLanguage), entry);
           return Array.from(sourceMap.values()).sort((a, b) => b.convertedAt - a.convertedAt);
         });
       }

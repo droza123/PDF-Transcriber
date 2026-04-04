@@ -175,12 +175,25 @@ export async function exportAsDocx(
   }
 }
 
+/**
+ * Build an effective source path that includes the translation language in the
+ * filename. The IPC save handlers derive the output name from this path, so
+ * `document.Spanish.pdf` → `document.Spanish.md`, etc.
+ */
+function effectiveSourcePath(sourcePath: string, translationLanguage?: string): string {
+  if (!translationLanguage) return sourcePath;
+  const lastDot = sourcePath.lastIndexOf('.');
+  if (lastDot === -1) return `${sourcePath}.${translationLanguage}`;
+  return `${sourcePath.slice(0, lastDot)}.${translationLanguage}${sourcePath.slice(lastDot)}`;
+}
+
 /** Auto-export to all formats selected in settings. Always stores markdown internally. */
 export async function runAutoExport(
   sourcePath: string,
   fileName: string,
   markdown: string,
   jobId: string,
+  translationLanguage?: string,
 ): Promise<{ savedPath: string | null; errors: string[] }> {
   const api = window.electronAPI;
   if (!api) return { savedPath: null, errors: [] };
@@ -189,6 +202,9 @@ export async function runAutoExport(
   const unique = fileNaming === 'unique';
   const errors: string[] = [];
   let savedPath: string | null = null;
+
+  // For translations, include the language in the output filename
+  const outPath = effectiveSourcePath(sourcePath, translationLanguage);
 
   // Always store markdown internally for re-export / preview
   try {
@@ -201,23 +217,23 @@ export async function runAutoExport(
     try {
       switch (fmt) {
         case 'md': {
-          savedPath = await api.saveMarkdown(sourcePath, markdown, unique);
+          savedPath = await api.saveMarkdown(outPath, markdown, unique);
           break;
         }
         case 'html': {
           const title = fileName.replace(/\.pdf$/i, '');
           const html = await renderMarkdownToHtml(markdown, title);
-          await api.saveFile(sourcePath, html, 'html', unique);
+          await api.saveFile(outPath, html, 'html', unique);
           break;
         }
         case 'docx': {
           const buffer = await api.convertMarkdownToDocx(markdown, 'standard');
-          await api.saveFile(sourcePath, buffer, 'docx', unique);
+          await api.saveFile(outPath, buffer, 'docx', unique);
           break;
         }
         case 'docx-logos': {
           const buffer = await api.convertMarkdownToDocx(markdown, 'logos');
-          await api.saveFile(sourcePath, buffer, 'logos.docx', unique);
+          await api.saveFile(outPath, buffer, 'logos.docx', unique);
           break;
         }
       }

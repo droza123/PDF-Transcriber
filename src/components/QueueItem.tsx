@@ -33,8 +33,8 @@ function formatPrevDate(ts: number): string {
   const diff = now.getTime() - d.getTime();
   const days = Math.floor(diff / 86400000);
 
-  if (days === 0) return 'Today';
-  if (days === 1) return 'Yesterday';
+  if (days === 0) return 'today';
+  if (days === 1) return 'yesterday';
   if (days < 7) return `${days} days ago`;
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: d.getFullYear() !== now.getFullYear() ? 'numeric' : undefined });
 }
