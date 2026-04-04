@@ -109,8 +109,20 @@ export default function App() {
 
       const rehydratedJobs: ConversionJob[] = [];
       for (const entry of savedQueue) {
-        // For markdown-based translations, sourcePath may not need to exist on disk
-        if (!entry.sourceMarkdown) {
+        // For markdown-based translations, load the source markdown from internal storage
+        let sourceMarkdown: string | undefined;
+        if (entry.hasSourceMarkdown || entry.sourceMarkdown) {
+          const loaded = await window.electronAPI.loadInternalMarkdown(`translate-src-${entry.id}`);
+          if (loaded) {
+            sourceMarkdown = loaded;
+          } else if (entry.sourceMarkdown) {
+            // Backward compat: old queue entries may still have inline sourceMarkdown
+            sourceMarkdown = entry.sourceMarkdown;
+          } else {
+            // Source markdown was lost — skip this job
+            continue;
+          }
+        } else {
           const exists = await window.electronAPI.fileExists(entry.sourcePath);
           if (!exists) continue;
         }
@@ -138,7 +150,7 @@ export default function App() {
           completedAt: null,
           resumeFrom: progress?.completedBatches,
           translationLanguage: entry.translationLanguage,
-          sourceMarkdown: entry.sourceMarkdown,
+          sourceMarkdown,
         });
       }
 
@@ -214,7 +226,7 @@ export default function App() {
           completedBatches: j.currentBatch,
           addedAt: j.startedAt ?? Date.now(),
           translationLanguage: j.translationLanguage || undefined,
-          sourceMarkdown: j.sourceMarkdown || undefined,
+          hasSourceMarkdown: !!j.sourceMarkdown || undefined,
         }));
       window.electronAPI?.saveQueue(entries);
     }, 500);
@@ -812,6 +824,8 @@ export default function App() {
       sourceMarkdown: md,
       translationLanguage: language,
     };
+    // Persist the source markdown separately so queue.json doesn't bloat
+    window.electronAPI?.saveInternalMarkdown(`translate-src-${job.id}`, md);
     setJobs(prev => [...prev, job]);
     setSidebarTab('queue');
     setTimeout(processQueue, 50);

@@ -37,7 +37,8 @@ export interface SerializedQueueEntry {
   completedBatches: number;
   addedAt: number;
   translationLanguage?: string;
-  sourceMarkdown?: string;
+  sourceMarkdown?: string; // backward compat only — new entries use hasSourceMarkdown
+  hasSourceMarkdown?: boolean;
 }
 
 /** A completed conversion stored in history. */
