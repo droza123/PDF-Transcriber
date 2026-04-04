@@ -39,7 +39,7 @@ export default function HistoryItem({ entry, isActive, onPreview, onShowInFolder
   return (
     <div
       className={`
-        flex items-center gap-3 px-3 py-2.5 rounded-lg
+        group flex items-center gap-3 px-3 py-2.5 rounded-lg
         ${isActive ? 'glow-ring bg-p-accent/8' : 'card-hover'}
       `}
     >
@@ -78,6 +78,7 @@ export default function HistoryItem({ entry, isActive, onPreview, onShowInFolder
         )}
       </div>
 
+      {/* Actions: eye always visible, rest appear on hover */}
       <div className="flex items-center gap-0.5 shrink-0">
         <button
           onClick={() => onPreview(entry)}
@@ -86,41 +87,43 @@ export default function HistoryItem({ entry, isActive, onPreview, onShowInFolder
         >
           <Eye className="w-3.5 h-3.5" />
         </button>
-        {/* Translate button — only for transcriptions (not already-translated entries) */}
-        {isTranscription && onTranslate && (
+        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 tab-transition">
+          {/* Translate button — only for transcriptions */}
+          {isTranscription && onTranslate && (
+            <button
+              onClick={() => setShowLangPicker(!showLangPicker)}
+              className={`p-1.5 rounded-md tab-transition ${
+                showLangPicker
+                  ? 'text-p-accent bg-p-accent/10'
+                  : 'text-p-text-dim hover:text-p-accent hover:bg-p-surface-hover'
+              }`}
+              title="Translate from this transcription"
+            >
+              <Languages className="w-3.5 h-3.5" />
+            </button>
+          )}
           <button
-            onClick={() => setShowLangPicker(!showLangPicker)}
-            className={`p-1.5 rounded-md tab-transition ${
-              showLangPicker
-                ? 'text-p-accent bg-p-accent/10'
-                : 'text-p-text-dim hover:text-p-accent hover:bg-p-surface-hover'
-            }`}
-            title="Translate from this transcription"
+            onClick={() => onReconvert(entry)}
+            className="p-1.5 rounded-md text-p-text-dim hover:text-p-accent hover:bg-p-surface-hover tab-transition"
+            title="Re-convert"
           >
-            <Languages className="w-3.5 h-3.5" />
+            <RefreshCw className="w-3.5 h-3.5" />
           </button>
-        )}
-        <button
-          onClick={() => onReconvert(entry)}
-          className="p-1.5 rounded-md text-p-text-dim hover:text-p-accent hover:bg-p-surface-hover tab-transition"
-          title="Re-convert"
-        >
-          <RefreshCw className="w-3.5 h-3.5" />
-        </button>
-        <button
-          onClick={() => onShowInFolder(entry)}
-          className="p-1.5 rounded-md text-p-text-dim hover:text-p-success hover:bg-p-surface-hover tab-transition"
-          title="Show in folder"
-        >
-          <FolderOpen className="w-3.5 h-3.5" />
-        </button>
-        <button
-          onClick={() => onDelete(entry.id)}
-          className="p-1.5 rounded-md text-p-text-dim hover:text-p-error hover:bg-p-surface-hover tab-transition"
-          title="Remove from history"
-        >
-          <Trash2 className="w-3.5 h-3.5" />
-        </button>
+          <button
+            onClick={() => onShowInFolder(entry)}
+            className="p-1.5 rounded-md text-p-text-dim hover:text-p-success hover:bg-p-surface-hover tab-transition"
+            title="Show in folder"
+          >
+            <FolderOpen className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={() => onDelete(entry.id)}
+            className="p-1.5 rounded-md text-p-text-dim hover:text-p-error hover:bg-p-surface-hover tab-transition"
+            title="Remove from history"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+          </button>
+        </div>
       </div>
     </div>
   );
