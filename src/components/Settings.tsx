@@ -283,6 +283,20 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
     setValidationResult(null);
   }
 
+  // Debounce outputNotes saves
+  useEffect(() => {
+    if (!open) return;
+    const timer = setTimeout(() => saveSettings({ outputNotes }), 300);
+    return () => clearTimeout(timer);
+  }, [outputNotes]);
+
+  // Debounce customBaseUrl saves
+  useEffect(() => {
+    if (!open) return;
+    const timer = setTimeout(() => saveSettings({ customBaseUrl }), 300);
+    return () => clearTimeout(timer);
+  }, [customBaseUrl]);
+
   if (!open) return null;
 
   const defaultModels = PROVIDER_DEFAULT_MODELS[selectedProvider] || [];
@@ -330,20 +344,6 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
       });
     }
   }
-
-  // Debounce outputNotes saves
-  useEffect(() => {
-    if (!open) return;
-    const timer = setTimeout(() => saveSettings({ outputNotes }), 300);
-    return () => clearTimeout(timer);
-  }, [outputNotes]);
-
-  // Debounce customBaseUrl saves
-  useEffect(() => {
-    if (!open) return;
-    const timer = setTimeout(() => saveSettings({ customBaseUrl }), 300);
-    return () => clearTimeout(timer);
-  }, [customBaseUrl]);
 
   return (
     <div
