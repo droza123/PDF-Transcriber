@@ -51,10 +51,16 @@ export class OpenRouterProvider implements Provider {
       const data = await res.json();
       const rawModels: OpenRouterModelData[] = data.data || [];
 
-      // Filter to vision-capable models (can accept image inputs)
+      // Filter to models that accept image input and produce text-only output.
+      // Modality format is "input_types->output_types", e.g. "text+image->text".
+      // Exclude models that output audio (Lyria), images (generators), etc.
       const visionModels = rawModels.filter(m => {
         const modality = m.architecture?.modality || '';
-        return modality.includes('image') || modality.includes('multimodal');
+        const [inputSide, outputSide] = modality.split('->');
+        if (!inputSide || !outputSide) return false;
+        const acceptsImages = inputSide.includes('image');
+        const outputsTextOnly = outputSide.trim() === 'text';
+        return acceptsImages && outputsTextOnly;
       });
 
       const models: ProviderModel[] = visionModels.map(m => {
