@@ -1,3 +1,5 @@
+import type { ProviderId } from './providers/types';
+
 export type ExportFormat = 'md' | 'html' | 'docx' | 'docx-logos';
 export type FileNaming = 'overwrite' | 'unique';
 
@@ -6,8 +8,32 @@ export const DEFAULT_TRANSLATION_LANGUAGES = [
   'Chinese (Simplified)', 'Japanese', 'Korean', 'Arabic', 'Russian',
 ];
 
+export const DEFAULT_GEMINI_MODELS = [
+  'gemini-3.1-flash-lite',
+  'gemini-3.1-flash-lite-preview',
+  'gemini-3-flash',
+  'gemini-3-flash-preview',
+  'gemini-2.5-flash',
+];
+
+export const DEFAULT_ANTHROPIC_MODELS = [
+  'claude-sonnet-4-20250514',
+  'claude-haiku-35-20241022',
+];
+
+export const DEFAULT_OPENROUTER_MODELS: string[] = [];
+
+/** Per-provider default model lists. */
+export const PROVIDER_DEFAULT_MODELS: Record<ProviderId, string[]> = {
+  gemini: DEFAULT_GEMINI_MODELS,
+  anthropic: DEFAULT_ANTHROPIC_MODELS,
+  openrouter: DEFAULT_OPENROUTER_MODELS,
+};
+
 export interface AppSettings {
-  modelPriority: string[];
+  activeProvider: ProviderId;
+  providerModelPriority: Record<ProviderId, string[]>;
+  openrouterAutoFreeModels: boolean;
   batchSize: number;
   outputNotes: string;
   autoExportFormats: ExportFormat[];
@@ -21,7 +47,13 @@ export interface AppSettings {
 const STORAGE_KEY = 'app_settings';
 
 const DEFAULTS: AppSettings = {
-  modelPriority: ['gemini-3.1-flash-lite', 'gemini-3.1-flash-lite-preview', 'gemini-3-flash', 'gemini-3-flash-preview', 'gemini-2.5-flash'],
+  activeProvider: 'gemini',
+  providerModelPriority: {
+    gemini: [...DEFAULT_GEMINI_MODELS],
+    anthropic: [...DEFAULT_ANTHROPIC_MODELS],
+    openrouter: [...DEFAULT_OPENROUTER_MODELS],
+  },
+  openrouterAutoFreeModels: true,
   batchSize: 5,
   outputNotes: '',
   autoExportFormats: ['md'],
@@ -38,19 +70,56 @@ export function getSettings(): AppSettings {
     if (!raw) return DEFAULTS;
     const parsed = JSON.parse(raw);
 
-    // Migration: old format had `model: string` instead of `modelPriority: string[]`
+    // ── Migration: old single-provider format ──────────────────────────────
+
+    // Migrate old `model: string` → modelPriority
     if ('model' in parsed && !('modelPriority' in parsed)) {
       const oldModel: string = parsed.model;
-      parsed.modelPriority = [oldModel, ...DEFAULT_MODELS.filter(m => m !== oldModel)];
+      parsed.modelPriority = [oldModel, ...DEFAULT_GEMINI_MODELS.filter(m => m !== oldModel)];
       delete parsed.model;
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
+    }
+
+    // Migrate old `modelPriority: string[]` → providerModelPriority
+    if ('modelPriority' in parsed && !('providerModelPriority' in parsed)) {
+      const oldPriority: string[] = parsed.modelPriority;
+      parsed.providerModelPriority = {
+        gemini: oldPriority.length > 0 ? oldPriority : [...DEFAULT_GEMINI_MODELS],
+        anthropic: [...DEFAULT_ANTHROPIC_MODELS],
+        openrouter: [...DEFAULT_OPENROUTER_MODELS],
+      };
+      delete parsed.modelPriority;
+    }
+
+    // Ensure activeProvider exists (default to gemini for existing users)
+    if (!('activeProvider' in parsed)) {
+      parsed.activeProvider = 'gemini';
+    }
+
+    // Ensure providerModelPriority has all providers
+    if (parsed.providerModelPriority) {
+      if (!parsed.providerModelPriority.gemini) {
+        parsed.providerModelPriority.gemini = [...DEFAULT_GEMINI_MODELS];
+      }
+      if (!parsed.providerModelPriority.anthropic) {
+        parsed.providerModelPriority.anthropic = [...DEFAULT_ANTHROPIC_MODELS];
+      }
+      if (!parsed.providerModelPriority.openrouter) {
+        parsed.providerModelPriority.openrouter = [...DEFAULT_OPENROUTER_MODELS];
+      }
+    }
+
+    // Ensure openrouterAutoFreeModels exists
+    if (!('openrouterAutoFreeModels' in parsed)) {
+      parsed.openrouterAutoFreeModels = true;
     }
 
     // Migration: add English and trim translation languages to new defaults
     if (parsed.translationLanguages && !parsed.translationLanguages.includes('English')) {
       parsed.translationLanguages = [...DEFAULT_TRANSLATION_LANGUAGES];
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
     }
+
+    // Persist migrations
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
 
     return { ...DEFAULTS, ...parsed };
   } catch {
@@ -63,37 +132,48 @@ export function saveSettings(partial: Partial<AppSettings>): void {
   localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...current, ...partial }));
 }
 
-/** Return the first (highest-priority) model name. */
-export function getPrimaryModel(): string {
-  const { modelPriority } = getSettings();
-  return modelPriority[0] ?? DEFAULT_MODELS[0];
+/** Return the model priority list for the active provider. */
+export function getActiveModelPriority(): string[] {
+  const { activeProvider, providerModelPriority } = getSettings();
+  const priority = providerModelPriority[activeProvider];
+  if (priority && priority.length > 0) return priority;
+  return PROVIDER_DEFAULT_MODELS[activeProvider] || [];
 }
 
-export const DEFAULT_MODELS = ['gemini-3.1-flash-lite', 'gemini-3.1-flash-lite-preview', 'gemini-3-flash', 'gemini-3-flash-preview', 'gemini-2.5-flash'];
+/** Return the first (highest-priority) model name for the active provider. */
+export function getPrimaryModel(): string {
+  const models = getActiveModelPriority();
+  return models[0] ?? '';
+}
+
+/** Convenience alias kept for backward compat with convert.ts frontmatter. */
+export const DEFAULT_MODELS = DEFAULT_GEMINI_MODELS;
 
 /**
- * Initialize model priority from available models returned by Google's API.
- * Uses DEFAULT_MODELS as the preferred order — only models that actually exist
- * are included. Called once after the API key is first configured.
+ * Initialize model priority for a provider from its available models.
+ * Only updates if the user hasn't customized the priority for that provider.
  */
-export function initializeModelPriority(availableModels: string[]): void {
-  // Only initialize if the user hasn't customized model priority.
-  // Check whether the saved modelPriority differs from the built-in defaults —
-  // if it does, the user has reordered or changed it and we shouldn't overwrite.
+export function initializeModelPriority(provider: ProviderId, availableModels: string[]): void {
   const raw = localStorage.getItem(STORAGE_KEY);
   if (raw) {
     try {
       const parsed = JSON.parse(raw);
-      if (parsed.modelPriority && JSON.stringify(parsed.modelPriority) !== JSON.stringify(DEFAULTS.modelPriority)) {
-        return; // user has customized — don't touch
+      const current = parsed.providerModelPriority?.[provider];
+      const defaults = PROVIDER_DEFAULT_MODELS[provider];
+      // If user has customized, don't overwrite
+      if (current && current.length > 0 && JSON.stringify(current) !== JSON.stringify(defaults)) {
+        return;
       }
-    } catch { /* proceed with initialization */ }
+    } catch { /* proceed */ }
   }
 
   const available = new Set(availableModels);
-  const priority = DEFAULT_MODELS.filter(m => available.has(m));
+  const defaults = PROVIDER_DEFAULT_MODELS[provider];
+  const priority = defaults.filter(m => available.has(m));
   if (priority.length > 0) {
-    saveSettings({ modelPriority: priority });
+    const settings = getSettings();
+    settings.providerModelPriority[provider] = priority;
+    saveSettings({ providerModelPriority: settings.providerModelPriority });
   }
 }
 

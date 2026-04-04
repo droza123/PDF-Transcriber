@@ -1,66 +1,77 @@
-import { GoogleGenAI } from '@google/genai';
+import type { ProviderId } from './providers/types';
+import { getSettings } from './settings';
 
-const STORAGE_KEY = 'gemini_api_key';
-
-export function getApiKey(): string | null {
-  return localStorage.getItem(STORAGE_KEY) || process.env.GEMINI_API_KEY || null;
+function storageKey(provider: ProviderId): string {
+  return `provider_api_key_${provider}`;
 }
 
-export function setApiKey(key: string): void {
-  localStorage.setItem(STORAGE_KEY, key);
-}
+export function getApiKey(provider?: ProviderId): string | null {
+  const p = provider ?? getSettings().activeProvider;
 
-export function clearApiKey(): void {
-  localStorage.removeItem(STORAGE_KEY);
-}
-
-export function hasApiKey(): boolean {
-  return !!getApiKey();
-}
-
-/** Validate an API key by making a lightweight models.get call. */
-export async function validateApiKey(key: string): Promise<{ valid: boolean; error?: string }> {
-  try {
-    const ai = new GoogleGenAI({ apiKey: key });
-    await ai.models.get({ model: 'gemini-2.5-flash' });
-    return { valid: true };
-  } catch (e: any) {
-    return { valid: false, error: e.message || 'Invalid API key' };
+  // Migration: move old gemini_api_key to new format on first access
+  if (p === 'gemini') {
+    const oldKey = localStorage.getItem('gemini_api_key');
+    if (oldKey) {
+      localStorage.setItem(storageKey('gemini'), oldKey);
+      localStorage.removeItem('gemini_api_key');
+      return oldKey;
+    }
   }
+
+  return localStorage.getItem(storageKey(p)) || null;
 }
 
-/** Fetch available models from the Gemini REST API. */
-export async function fetchAvailableModels(key: string): Promise<string[]> {
+export function setApiKey(provider: ProviderId, key: string): void {
+  localStorage.setItem(storageKey(provider), key);
+}
+
+export function clearApiKey(provider: ProviderId): void {
+  localStorage.removeItem(storageKey(provider));
+}
+
+export function hasApiKey(provider?: ProviderId): boolean {
+  return !!getApiKey(provider);
+}
+
+/** Get cached available models for a provider. */
+export function getCachedModels(provider?: ProviderId): string[] {
+  const p = provider ?? getSettings().activeProvider;
   try {
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(key)}`,
-    );
-    if (!res.ok) return [];
-    const data = await res.json();
-    const models: string[] = (data.models || [])
-      .filter((m: any) =>
-        m.supportedGenerationMethods?.includes('generateContent') &&
-        /flash|pro/i.test(m.name) &&
-        // Only v2+ models handle PDFs well
-        /gemini-(2|3|4)/i.test(m.name) &&
-        // Exclude thinking/embedding/vision-only variants
-        !/thinking|embedding|aqa|text|tts/i.test(m.name),
-      )
-      .map((m: any) => m.name.replace('models/', ''))
-      .sort()
-      .reverse();
-    localStorage.setItem('available_models', JSON.stringify(models));
-    return models;
+    return JSON.parse(localStorage.getItem(`available_models_${p}`) || '[]');
   } catch {
     return [];
   }
 }
 
-/** Get cached available models. */
-export function getCachedModels(): string[] {
-  try {
-    return JSON.parse(localStorage.getItem('available_models') || '[]');
-  } catch {
-    return [];
+/** Cache available models for a provider. */
+export function setCachedModels(provider: ProviderId, models: string[]): void {
+  localStorage.setItem(`available_models_${provider}`, JSON.stringify(models));
+}
+
+/**
+ * Validate and fetch models using the provider implementation.
+ * This is a convenience wrapper — the actual logic lives in each provider.
+ */
+export async function validateAndFetchModels(
+  provider: ProviderId,
+  key: string,
+): Promise<{
+  valid: boolean;
+  error?: string;
+  models: string[];
+}> {
+  // Dynamic import to avoid circular deps
+  const { getProvider } = await import('./providers/registry');
+  const p = getProvider(provider);
+
+  const validation = await p.validateKey(key);
+  if (!validation.valid) {
+    return { valid: false, error: validation.error, models: [] };
   }
+
+  const providerModels = await p.fetchModels(key);
+  const modelIds = providerModels.map(m => m.id);
+  setCachedModels(provider, modelIds);
+
+  return { valid: true, models: modelIds };
 }

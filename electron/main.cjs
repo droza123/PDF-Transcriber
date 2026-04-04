@@ -62,12 +62,20 @@ function createWindow() {
     mainWindow.loadURL(devUrl);
   }
 
-  // Inject referer for Google API requests (Electron's file:// sends no referer,
+  // Inject referer/origin for API requests (Electron's file:// sends no referer,
   // which gets blocked by API key website restrictions)
   mainWindow.webContents.session.webRequest.onBeforeSendHeaders(
-    { urls: ['https://*.googleapis.com/*'] },
+    { urls: [
+      'https://*.googleapis.com/*',
+      'https://api.anthropic.com/*',
+      'https://openrouter.ai/*',
+    ]},
     (details, callback) => {
       details.requestHeaders['Referer'] = 'http://localhost:3001/';
+      // Anthropic requires Origin for browser access
+      if (details.url.includes('api.anthropic.com')) {
+        details.requestHeaders['Origin'] = 'http://localhost:3001';
+      }
       callback({ requestHeaders: details.requestHeaders });
     }
   );

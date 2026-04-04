@@ -1,6 +1,6 @@
 import type { ConversionJob, PartialProgress } from '../types';
 import { getPdfPageCount, extractPdfPageRange } from './pdfUtils';
-import { getPrimaryModel, addSessionSkippedModel } from './settings';
+import { getPrimaryModel, addSessionSkippedModel, getSettings } from './settings';
 import {
   getBatchSize,
   extractDocumentOutline,
@@ -52,12 +52,14 @@ function buildFrontmatter(fileName: string, totalPages: number): string {
     .trim();
   const date = new Date().toISOString().split('T')[0];
   const model = getPrimaryModel();
+  const provider = getSettings().activeProvider;
   return `---
 title: "${title}"
 source_file: "${fileName}"
 pages: ${totalPages}
 converted: "${date}"
 converter: "PDF Transcriber"
+provider: "${provider}"
 model: "${model}"
 ---`;
 }

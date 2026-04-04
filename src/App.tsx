@@ -2,10 +2,12 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import type { ConversionJob, HistoryEntry, LogEntry } from './types';
 import { createJob } from './types';
-import { hasApiKey } from './lib/apiKey';
+import { hasApiKey, getApiKey } from './lib/apiKey';
 import { convertFile } from './lib/convert';
 import { canSaveToSource, runAutoExport, exportHistoryAsCsv } from './lib/download';
-import { getSettings } from './lib/settings';
+import { getSettings, saveSettings } from './lib/settings';
+import { getProvider } from './lib/providers/registry';
+import { OpenRouterProvider } from './lib/providers/openrouter';
 import Header from './components/Header';
 import ApiKeyInput from './components/ApiKeyInput';
 import FileDropZone from './components/FileDropZone';
@@ -101,6 +103,31 @@ export default function App() {
       }
     }
     rehydrate();
+  }, []);
+
+  // ── OpenRouter auto-select free models on startup ─────────────────────
+  useEffect(() => {
+    async function autoRefreshOpenRouterModels() {
+      const settings = getSettings();
+      if (settings.activeProvider !== 'openrouter') return;
+      if (!settings.openrouterAutoFreeModels) return;
+      const key = getApiKey('openrouter');
+      if (!key) return;
+
+      try {
+        const provider = getProvider('openrouter') as OpenRouterProvider;
+        const topFree = await provider.getTopFreeModels(key);
+        if (topFree.length > 0) {
+          const current = getSettings();
+          const updated = { ...current.providerModelPriority, openrouter: topFree };
+          saveSettings({ providerModelPriority: updated });
+          console.log(`[openrouter] Auto-selected ${topFree.length} free models`);
+        }
+      } catch (e) {
+        console.warn('[openrouter] Auto-refresh failed:', e);
+      }
+    }
+    autoRefreshOpenRouterModels();
   }, []);
 
   // ── Eager persistence: queue + auto-archive done jobs to history ────────

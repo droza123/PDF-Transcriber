@@ -3,12 +3,39 @@ import { X, Save, GripVertical, RefreshCw, Info } from 'lucide-react';
 import { DndContext, closestCenter, type DragEndEvent } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { getSettings, saveSettings, DEFAULT_MODELS, DEFAULT_TRANSLATION_LANGUAGES, getSessionSkippedModels, type ExportFormat, type FileNaming } from '../lib/settings';
-import { getCachedModels, getApiKey, fetchAvailableModels } from '../lib/apiKey';
+import { getSettings, saveSettings, PROVIDER_DEFAULT_MODELS, DEFAULT_TRANSLATION_LANGUAGES, getSessionSkippedModels, type ExportFormat, type FileNaming } from '../lib/settings';
+import { getCachedModels, getApiKey, hasApiKey, validateAndFetchModels } from '../lib/apiKey';
+import { getAllProviders, getProvider } from '../lib/providers/registry';
+import type { ProviderId, ProviderModel } from '../lib/providers/types';
+import { OpenRouterProvider } from '../lib/providers/openrouter';
 
 interface SettingsProps {
   open: boolean;
   onClose: () => void;
+}
+
+/** Returns a React element showing pricing info for a model, or null. */
+function getPricingBadge(modelId: string, modelData: ProviderModel[]): React.ReactNode {
+  const data = modelData.find(m => m.id === modelId);
+  if (!data) return null;
+  if (data.isFree) {
+    return (
+      <span className="text-[10px] font-medium text-green-400 bg-green-400/10 rounded-full px-1.5 py-0.5 shrink-0">
+        Free
+      </span>
+    );
+  }
+  if (data.pricePerMTokens != null && data.pricePerMTokens > 0) {
+    const price = data.pricePerMTokens < 1
+      ? `$${data.pricePerMTokens.toFixed(2)}/M`
+      : `$${data.pricePerMTokens.toFixed(0)}/M`;
+    return (
+      <span className="text-[10px] font-medium text-p-text-dim bg-p-surface-hover rounded-full px-1.5 py-0.5 shrink-0">
+        {price}
+      </span>
+    );
+  }
+  return null;
 }
 
 function SkippedBadge({ reason }: { reason: string }) {
@@ -32,12 +59,14 @@ function SortableModelItem({
   onToggle,
   canRemove,
   skipReason,
+  pricingBadge,
 }: {
   model: string;
   index: number;
   onToggle: (model: string) => void;
   canRemove: boolean;
   skipReason?: string;
+  pricingBadge?: React.ReactNode;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition } = useSortable({ id: model });
   const isDragging = !!transform;
@@ -69,6 +98,7 @@ function SortableModelItem({
         title={canRemove ? 'Deselect model' : 'At least one model must be selected'}
       />
       <span className="flex-1 text-sm text-p-text truncate">{model}</span>
+      {pricingBadge}
       {skipReason && <SkippedBadge reason={skipReason} />}
       <span className="text-xs font-medium text-p-accent bg-p-accent/10 rounded-full px-2 py-0.5 shrink-0">
         {index + 1}
@@ -78,6 +108,7 @@ function SortableModelItem({
 }
 
 export default function Settings({ open, onClose }: SettingsProps) {
+  const [selectedProvider, setSelectedProvider] = useState<ProviderId>('gemini');
   const [modelPriority, setModelPriority] = useState<string[]>([]);
   const [batchSize, setBatchSize] = useState(10);
   const [outputNotes, setOutputNotes] = useState('');
@@ -91,11 +122,17 @@ export default function Settings({ open, onClose }: SettingsProps) {
   const [refreshing, setRefreshing] = useState(false);
   const [cachedModels, setCachedModels] = useState<string[]>([]);
   const [skippedModels, setSkippedModels] = useState<ReadonlyMap<string, string>>(new Map());
+  // OpenRouter-specific
+  const [autoFreeModels, setAutoFreeModels] = useState(true);
+  const [freeOnlyFilter, setFreeOnlyFilter] = useState(true);
+  const [openrouterModelData, setOpenrouterModelData] = useState<ProviderModel[]>([]);
 
   useEffect(() => {
     if (open) {
       const s = getSettings();
-      setModelPriority(s.modelPriority);
+      const provider = s.activeProvider;
+      setSelectedProvider(provider);
+      setModelPriority(s.providerModelPriority[provider] || []);
       setBatchSize(s.batchSize);
       setOutputNotes(s.outputNotes);
       setAutoExportFormats(s.autoExportFormats);
@@ -104,33 +141,85 @@ export default function Settings({ open, onClose }: SettingsProps) {
       setTranslationEnabled(s.translationEnabled);
       setTranslationLanguage(s.translationLanguage);
       setTranslationLanguages(s.translationLanguages);
-      setCachedModels(getCachedModels());
+      setCachedModels(getCachedModels(provider));
       setSkippedModels(new Map(getSessionSkippedModels()));
+      setAutoFreeModels(s.openrouterAutoFreeModels);
+      setFreeOnlyFilter(true);
+      // Load cached OpenRouter model data for pricing badges
+      if (provider === 'openrouter') {
+        const orProvider = getProvider('openrouter') as OpenRouterProvider;
+        setOpenrouterModelData(orProvider._getCachedModels());
+      }
     }
   }, [open]);
 
   async function handleRefreshModels() {
-    const key = getApiKey();
+    const key = getApiKey(selectedProvider);
     if (!key) return;
     setRefreshing(true);
-    const models = await fetchAvailableModels(key);
-    if (models.length > 0) {
-      setCachedModels(models);
-      // Remove selected models that are no longer available, but keep at least one
+    const result = await validateAndFetchModels(selectedProvider, key);
+    if (result.models.length > 0) {
+      setCachedModels(result.models);
       setModelPriority(prev => {
-        const stillAvailable = prev.filter(m => models.includes(m));
-        return stillAvailable.length > 0 ? stillAvailable : [models[0]];
+        const stillAvailable = prev.filter(m => result.models.includes(m));
+        return stillAvailable.length > 0 ? stillAvailable : [result.models[0]];
       });
     }
     setRefreshing(false);
   }
 
+  function handleProviderChange(id: ProviderId) {
+    // Save current model priority for the old provider before switching
+    const settings = getSettings();
+    const updatedPriority = { ...settings.providerModelPriority, [selectedProvider]: modelPriority };
+    saveSettings({ providerModelPriority: updatedPriority });
+
+    setSelectedProvider(id);
+    const newPriority = updatedPriority[id] || PROVIDER_DEFAULT_MODELS[id] || [];
+    setModelPriority(newPriority);
+    setCachedModels(getCachedModels(id));
+
+    // Load OpenRouter model data for pricing badges
+    if (id === 'openrouter') {
+      const orProvider = getProvider('openrouter') as OpenRouterProvider;
+      setOpenrouterModelData(orProvider._getCachedModels());
+    } else {
+      setOpenrouterModelData([]);
+    }
+  }
+
+  async function handleAutoFreeToggle(enabled: boolean) {
+    setAutoFreeModels(enabled);
+    if (enabled && selectedProvider === 'openrouter') {
+      const key = getApiKey('openrouter');
+      if (!key) return;
+      setRefreshing(true);
+      const orProvider = getProvider('openrouter') as OpenRouterProvider;
+      const topFree = await orProvider.getTopFreeModels(key);
+      if (topFree.length > 0) {
+        setModelPriority(topFree);
+        setOpenrouterModelData(orProvider._getCachedModels());
+        setCachedModels(topFree);
+      }
+      setRefreshing(false);
+    }
+  }
+
   if (!open) return null;
 
-  const availableModels = cachedModels.length > 0 ? cachedModels : DEFAULT_MODELS;
+  const defaultModels = PROVIDER_DEFAULT_MODELS[selectedProvider] || [];
+  const availableModels = cachedModels.length > 0 ? cachedModels : defaultModels;
   // Include any models from priority that aren't in the available list (e.g. deprecated)
   const allModels = [...new Set([...modelPriority, ...availableModels])];
   const unselected = allModels.filter(m => !modelPriority.includes(m));
+
+  // For OpenRouter: optionally filter unselected to free-only
+  const filteredUnselected = (selectedProvider === 'openrouter' && freeOnlyFilter && !autoFreeModels)
+    ? unselected.filter(m => {
+        const data = openrouterModelData.find(d => d.id === m);
+        return data?.isFree ?? false;
+      })
+    : unselected;
 
   function toggleModel(model: string) {
     setModelPriority(prev => {
@@ -158,7 +247,9 @@ export default function Settings({ open, onClose }: SettingsProps) {
   }
 
   const handleSave = () => {
-    saveSettings({ modelPriority, batchSize, outputNotes, autoExportFormats, fileNaming, preventSleep, translationEnabled, translationLanguage, translationLanguages });
+    const settings = getSettings();
+    const providerModelPriority = { ...settings.providerModelPriority, [selectedProvider]: modelPriority };
+    saveSettings({ activeProvider: selectedProvider, providerModelPriority, openrouterAutoFreeModels: autoFreeModels, batchSize, outputNotes, autoExportFormats, fileNaming, preventSleep, translationEnabled, translationLanguage, translationLanguages });
     onClose();
   };
 
@@ -182,13 +273,42 @@ export default function Settings({ open, onClose }: SettingsProps) {
         </div>
 
         <div className="space-y-4">
-          {/* Model Priority */}
+          {/* Active Provider */}
           <div>
+            <label className="block text-sm font-medium text-p-text mb-1.5">Active provider</label>
+            <div className="flex gap-1.5">
+              {getAllProviders().map(p => {
+                const isSelected = p.id === selectedProvider;
+                const keyConfigured = hasApiKey(p.id);
+                return (
+                  <button
+                    key={p.id}
+                    onClick={() => handleProviderChange(p.id)}
+                    disabled={!keyConfigured}
+                    className={`flex-1 px-3 py-2 text-xs rounded-lg border tab-transition ${
+                      isSelected
+                        ? 'border-p-accent bg-p-accent/10 text-p-accent font-medium'
+                        : keyConfigured
+                          ? 'border-p-border bg-p-bg text-p-text-muted hover:text-p-text hover:border-p-accent/50'
+                          : 'border-p-border bg-p-bg text-p-text-dim/50 cursor-not-allowed'
+                    }`}
+                    title={keyConfigured ? undefined : `Configure ${p.displayName} API key first`}
+                  >
+                    {p.displayName}
+                    {!keyConfigured && <span className="block text-[10px] text-p-text-dim/40 mt-0.5">No key</span>}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Model Priority */}
+          <div className="border-t border-p-border pt-4">
             <div className="flex items-center justify-between mb-1">
               <div className="flex items-center gap-1.5">
                 <label className="text-sm font-medium text-p-text">Model priority</label>
                 <span
-                  title="Flash and Flash-lite models are fast and free-tier friendly. Pro models are slower but better with complex layouts. Preview versions are newer but may be less stable."
+                  title="Models are tried in order during conversion. If one fails, the next is used."
                   className="text-p-text-dim hover:text-p-text cursor-help"
                 >
                   <Info className="w-3.5 h-3.5" />
@@ -196,16 +316,56 @@ export default function Settings({ open, onClose }: SettingsProps) {
               </div>
               <button
                 onClick={handleRefreshModels}
-                disabled={refreshing || !getApiKey()}
+                disabled={refreshing || !getApiKey(selectedProvider)}
                 className="flex items-center gap-1 text-xs text-p-text-dim hover:text-p-text disabled:opacity-30 tab-transition"
-                title="Refresh model list from Google API"
+                title="Refresh model list"
               >
                 <RefreshCw className={`w-3 h-3 ${refreshing ? 'animate-spin' : ''}`} />
                 {refreshing ? 'Refreshing...' : 'Refresh'}
               </button>
             </div>
+
+            {/* OpenRouter-specific controls */}
+            {selectedProvider === 'openrouter' && (
+              <div className="space-y-1.5 mb-2">
+                <label className="flex items-center gap-2 px-2 py-1 rounded-lg hover:bg-p-surface-hover cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={autoFreeModels}
+                    onChange={e => handleAutoFreeToggle(e.target.checked)}
+                    className="shrink-0 accent-p-accent"
+                  />
+                  <span className="text-xs text-p-text">Auto-select top free models</span>
+                  <span
+                    title="When enabled, the model list is automatically updated with the most popular free models on app startup."
+                    className="text-p-text-dim hover:text-p-text cursor-help"
+                  >
+                    <Info className="w-3 h-3" />
+                  </span>
+                </label>
+                {!autoFreeModels && (
+                  <label className="flex items-center gap-2 px-2 py-1 rounded-lg hover:bg-p-surface-hover cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={freeOnlyFilter}
+                      onChange={e => setFreeOnlyFilter(e.target.checked)}
+                      className="shrink-0 accent-p-accent"
+                    />
+                    <span className="text-xs text-p-text">Show free models only</span>
+                  </label>
+                )}
+                {autoFreeModels && (
+                  <p className="text-[10px] text-p-text-dim/60 px-2">
+                    Models are auto-managed. Turn off to customize manually.
+                  </p>
+                )}
+              </div>
+            )}
+
             <p className="text-xs text-p-text-dim mb-1.5">
-              Models are tried in order during conversion. If one fails, the next is used. Drag to reorder.
+              {selectedProvider === 'openrouter' && autoFreeModels
+                ? 'Auto-managed: top free vision models from OpenRouter.'
+                : 'Models are tried in order during conversion. If one fails, the next is used. Drag to reorder.'}
             </p>
             <div className="rounded-lg border border-p-border bg-p-bg-deep overflow-y-auto max-h-48">
               {/* Selected models — sortable */}
@@ -219,23 +379,23 @@ export default function Settings({ open, onClose }: SettingsProps) {
                       onToggle={toggleModel}
                       canRemove={modelPriority.length > 1}
                       skipReason={skippedModels.get(model)}
+                      pricingBadge={getPricingBadge(model, openrouterModelData)}
                     />
                   ))}
                 </SortableContext>
               </DndContext>
 
-              {/* Unselected models — static */}
-              {unselected.length > 0 && (
+              {/* Unselected models — static, with optional free filter */}
+              {filteredUnselected.length > 0 && (
                 <>
                   {modelPriority.length > 0 && (
                     <div className="border-t border-p-border-subtle" />
                   )}
-                  {unselected.map(model => (
+                  {filteredUnselected.map(model => (
                     <div
                       key={model}
                       className="flex items-center gap-2 px-2 py-1.5 hover:bg-p-surface-hover"
                     >
-                      {/* Spacer to align with drag handle width */}
                       <div className="w-3.5 shrink-0" />
                       <input
                         type="checkbox"
@@ -244,6 +404,7 @@ export default function Settings({ open, onClose }: SettingsProps) {
                         className="shrink-0 accent-p-accent"
                       />
                       <span className="flex-1 text-sm text-p-text-muted truncate">{model}</span>
+                      {getPricingBadge(model, openrouterModelData)}
                       {skippedModels.has(model) && <SkippedBadge reason={skippedModels.get(model)!} />}
                     </div>
                   ))}
