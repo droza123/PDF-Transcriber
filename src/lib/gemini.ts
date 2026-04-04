@@ -209,15 +209,21 @@ export async function translateMarkdown(
     if (abortSignal?.aborted) throw new DOMException('Cancelled', 'AbortError');
 
     const chunkNum = i + 1;
+    const chunkStatusMsg = `Translating chunk ${chunkNum}/${totalChunks}...`;
     onProgress?.({
       currentChunk: chunkNum,
       totalChunks,
-      statusMessage: `Translating chunk ${chunkNum}/${totalChunks}...`,
+      statusMessage: chunkStatusMsg,
     });
 
     const prompt = buildTranslationPrompt(chunks[i], chunkNum, totalChunks, targetLanguage);
     const result = await callTextWithRetry(prompt, {
-      onRetry, onModelSkip, onModelStart, onStreamProgress, onError, abortSignal, skipModels,
+      onRetry, onModelSkip, onStreamProgress, onError, abortSignal, skipModels,
+      // Restore the chunk status message when a new model starts (clears rate-limit messages)
+      onModelStart: (model) => {
+        onModelStart?.(model);
+        onProgress?.({ currentChunk: chunkNum, totalChunks, statusMessage: chunkStatusMsg });
+      },
     });
 
     // Strip code fences the model may wrap output in
