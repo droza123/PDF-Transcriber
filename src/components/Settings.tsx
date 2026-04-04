@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react';
-import { X, Save, GripVertical, RefreshCw, Info } from 'lucide-react';
+import { X, Save, GripVertical, RefreshCw, Info, Eye, EyeOff, Trash2, ExternalLink, Loader2, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { DndContext, closestCenter, type DragEndEvent } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { getSettings, saveSettings, PROVIDER_DEFAULT_MODELS, DEFAULT_TRANSLATION_LANGUAGES, getSessionSkippedModels, type ExportFormat, type FileNaming } from '../lib/settings';
-import { getCachedModels, getApiKey, hasApiKey, validateAndFetchModels } from '../lib/apiKey';
+import { getSettings, saveSettings, initializeModelPriority, PROVIDER_DEFAULT_MODELS, DEFAULT_TRANSLATION_LANGUAGES, getSessionSkippedModels, type ExportFormat, type FileNaming } from '../lib/settings';
+import { getCachedModels, getApiKey, setApiKey, clearApiKey, hasApiKey, validateAndFetchModels } from '../lib/apiKey';
 import { getAllProviders, getProvider } from '../lib/providers/registry';
 import type { ProviderId, ProviderModel } from '../lib/providers/types';
 import { OpenRouterProvider } from '../lib/providers/openrouter';
@@ -122,6 +122,13 @@ export default function Settings({ open, onClose }: SettingsProps) {
   const [refreshing, setRefreshing] = useState(false);
   const [cachedModels, setCachedModels] = useState<string[]>([]);
   const [skippedModels, setSkippedModels] = useState<ReadonlyMap<string, string>>(new Map());
+  // API key input
+  const [editingKey, setEditingKey] = useState(false);
+  const [keyValue, setKeyValue] = useState('');
+  const [showKey, setShowKey] = useState(false);
+  const [validating, setValidating] = useState(false);
+  const [validationResult, setValidationResult] = useState<'success' | 'error' | null>(null);
+  const [validationError, setValidationError] = useState('');
   // OpenRouter-specific
   const [autoFreeModels, setAutoFreeModels] = useState(true);
   const [freeOnlyFilter, setFreeOnlyFilter] = useState(true);
@@ -145,6 +152,12 @@ export default function Settings({ open, onClose }: SettingsProps) {
       setSkippedModels(new Map(getSessionSkippedModels()));
       setAutoFreeModels(s.openrouterAutoFreeModels);
       setFreeOnlyFilter(true);
+      // Reset key editing state
+      setEditingKey(false);
+      setKeyValue('');
+      setShowKey(false);
+      setValidationResult(null);
+      setValidationError('');
       // Load cached OpenRouter model data for pricing badges
       if (provider === 'openrouter') {
         const orProvider = getProvider('openrouter') as OpenRouterProvider;
@@ -178,6 +191,11 @@ export default function Settings({ open, onClose }: SettingsProps) {
     const newPriority = updatedPriority[id] || PROVIDER_DEFAULT_MODELS[id] || [];
     setModelPriority(newPriority);
     setCachedModels(getCachedModels(id));
+    // Reset key editing state on provider switch
+    setEditingKey(false);
+    setKeyValue('');
+    setValidationResult(null);
+    setValidationError('');
 
     // Load OpenRouter model data for pricing badges
     if (id === 'openrouter') {
@@ -203,6 +221,42 @@ export default function Settings({ open, onClose }: SettingsProps) {
       }
       setRefreshing(false);
     }
+  }
+
+  async function handleKeySave() {
+    const key = keyValue.trim();
+    if (!key) return;
+    setValidating(true);
+    setValidationResult(null);
+    setValidationError('');
+
+    const result = await validateAndFetchModels(selectedProvider, key);
+    if (result.valid) {
+      setApiKey(selectedProvider, key);
+      setKeyValue('');
+      setEditingKey(false);
+      setValidating(false);
+      setValidationResult('success');
+      if (result.models.length > 0) {
+        initializeModelPriority(selectedProvider, result.models);
+        setCachedModels(result.models);
+        // Refresh model priority from what was just initialized
+        const s = getSettings();
+        setModelPriority(s.providerModelPriority[selectedProvider] || result.models.slice(0, 5));
+      }
+      setTimeout(() => setValidationResult(null), 3000);
+    } else {
+      setValidating(false);
+      setValidationResult('error');
+      setValidationError(result.error || 'Invalid key');
+    }
+  }
+
+  function handleKeyClear() {
+    clearApiKey(selectedProvider);
+    setEditingKey(false);
+    setKeyValue('');
+    setValidationResult(null);
   }
 
   if (!open) return null;
@@ -273,10 +327,13 @@ export default function Settings({ open, onClose }: SettingsProps) {
         </div>
 
         <div className="space-y-4">
-          {/* Active Provider */}
+          {/* Provider & API Key */}
           <div>
-            <label className="block text-sm font-medium text-p-text mb-1.5">Active provider</label>
-            <div className="flex gap-1.5">
+            <label className="block text-sm font-medium text-p-text mb-1">Provider</label>
+            <p className="text-xs text-p-text-dim mb-2">
+              Free options are usually more than good enough for most documents.
+            </p>
+            <div className="flex gap-1.5 mb-3">
               {getAllProviders().map(p => {
                 const isSelected = p.id === selectedProvider;
                 const keyConfigured = hasApiKey(p.id);
@@ -284,22 +341,151 @@ export default function Settings({ open, onClose }: SettingsProps) {
                   <button
                     key={p.id}
                     onClick={() => handleProviderChange(p.id)}
-                    disabled={!keyConfigured}
                     className={`flex-1 px-3 py-2 text-xs rounded-lg border tab-transition ${
                       isSelected
                         ? 'border-p-accent bg-p-accent/10 text-p-accent font-medium'
-                        : keyConfigured
-                          ? 'border-p-border bg-p-bg text-p-text-muted hover:text-p-text hover:border-p-accent/50'
-                          : 'border-p-border bg-p-bg text-p-text-dim/50 cursor-not-allowed'
+                        : 'border-p-border bg-p-bg text-p-text-muted hover:text-p-text hover:border-p-accent/50'
                     }`}
-                    title={keyConfigured ? undefined : `Configure ${p.displayName} API key first`}
                   >
                     {p.displayName}
-                    {!keyConfigured && <span className="block text-[10px] text-p-text-dim/40 mt-0.5">No key</span>}
+                    {keyConfigured && !isSelected && (
+                      <span className="ml-1 text-p-success">&#x2713;</span>
+                    )}
                   </button>
                 );
               })}
             </div>
+
+            {/* Provider description */}
+            {(() => {
+              const provider = getAllProviders().find(p => p.id === selectedProvider);
+              if (!provider) return null;
+              const descriptions: Record<ProviderId, string> = {
+                gemini: 'Generous free tier with fast models optimized for PDFs. Recommended starting point.',
+                openrouter: 'Access hundreds of models with one key. Many free models available \u2014 the app auto-selects the best ones.',
+                anthropic: 'Premium quality output with native PDF support. Requires a paid API key.',
+              };
+              return (
+                <p className="text-xs text-p-text-dim mb-3">{descriptions[selectedProvider]}</p>
+              );
+            })()}
+
+            {/* API Key input */}
+            {(() => {
+              const currentKey = getApiKey(selectedProvider);
+              const maskedKey = currentKey ? '\u2022\u2022\u2022\u2022\u2022\u2022' + currentKey.slice(-4) : null;
+              const provider = getAllProviders().find(p => p.id === selectedProvider);
+
+              if (editingKey) {
+                return (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <div className="relative flex-1">
+                        <input
+                          type={showKey ? 'text' : 'password'}
+                          value={keyValue}
+                          onChange={e => { setKeyValue(e.target.value); setValidationResult(null); }}
+                          onKeyDown={e => e.key === 'Enter' && !validating && handleKeySave()}
+                          placeholder={provider?.keyPlaceholder ?? 'Paste your API key'}
+                          className="w-full px-3 py-2 pr-8 text-sm font-mono rounded-lg bg-p-bg border border-p-border text-p-text placeholder:text-p-text-dim focus:outline-none focus:border-p-accent"
+                          autoFocus
+                          disabled={validating}
+                        />
+                        <button
+                          onClick={() => setShowKey(!showKey)}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 text-p-text-dim hover:text-p-text"
+                        >
+                          {showKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                      </div>
+                      <button
+                        onClick={handleKeySave}
+                        disabled={!keyValue.trim() || validating}
+                        className="p-2 rounded-lg bg-p-success/20 text-p-success hover:bg-p-success/30 disabled:opacity-30 tab-transition"
+                      >
+                        {validating ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+                      </button>
+                      <button
+                        onClick={() => { setEditingKey(false); setKeyValue(''); setValidationResult(null); }}
+                        disabled={validating}
+                        className="p-2 rounded-lg text-p-text-muted hover:bg-p-surface-hover tab-transition"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                    {validationResult === 'error' && (
+                      <p className="text-xs text-p-error flex items-center gap-1">
+                        <AlertTriangle className="w-3 h-3" /> {validationError}
+                      </p>
+                    )}
+                  </div>
+                );
+              }
+
+              if (currentKey) {
+                return (
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-mono text-p-text-dim">{maskedKey}</span>
+                    {validationResult === 'success' ? (
+                      <span className="text-xs text-p-success flex items-center gap-1">
+                        <CheckCircle2 className="w-3 h-3" /> Verified
+                      </span>
+                    ) : (
+                      <span className="text-xs text-p-success">Configured</span>
+                    )}
+                    <button
+                      onClick={() => { setEditingKey(true); setKeyValue(''); setValidationResult(null); }}
+                      className="text-xs px-2 py-1 rounded bg-p-surface-hover text-p-text-muted hover:text-p-text tab-transition"
+                    >
+                      Change
+                    </button>
+                    <button
+                      onClick={handleKeyClear}
+                      className="text-xs px-2 py-1 rounded text-p-error hover:bg-p-surface-hover tab-transition"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                );
+              }
+
+              // No key — show setup instructions
+              return (
+                <div className="space-y-2">
+                  <button
+                    onClick={() => setEditingKey(true)}
+                    className="text-sm px-3 py-1.5 rounded-lg bg-p-accent text-white hover:bg-p-accent-bright tab-transition"
+                  >
+                    Enter API Key
+                  </button>
+                  {provider && (
+                    <div className="text-xs text-p-text-dim leading-relaxed space-y-1">
+                      <ol className="list-decimal list-inside space-y-0.5 pl-1">
+                        {provider.keyHelpSteps.map((step, i) => (
+                          <li key={i}>
+                            {i === 0 ? (
+                              <>
+                                Go to{' '}
+                                <a
+                                  href={provider.keyHelpUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-p-accent hover:text-p-accent-bright inline-flex items-center gap-0.5"
+                                >
+                                  {step} <ExternalLink className="w-3 h-3 inline" />
+                                </a>
+                              </>
+                            ) : (
+                              step
+                            )}
+                          </li>
+                        ))}
+                      </ol>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
           </div>
 
           {/* Model Priority */}

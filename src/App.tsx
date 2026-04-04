@@ -9,7 +9,7 @@ import { getSettings, saveSettings } from './lib/settings';
 import { getProvider } from './lib/providers/registry';
 import { OpenRouterProvider } from './lib/providers/openrouter';
 import Header from './components/Header';
-import ApiKeyInput from './components/ApiKeyInput';
+import ProviderBanner from './components/ProviderBanner';
 import FileDropZone from './components/FileDropZone';
 import Queue from './components/Queue';
 import History from './components/History';
@@ -612,10 +612,10 @@ export default function App() {
             </div>
           ) : (
             <>
-              {/* Collapse button + API key row */}
+              {/* Collapse button + provider banner row */}
               <div className="flex items-center gap-2 px-4 pt-4 pb-2 shrink-0">
                 <div className="flex-1 min-w-0">
-                  <ApiKeyInput onKeyChanged={() => setKeyPresent(hasApiKey())} />
+                  <ProviderBanner onOpenSettings={() => setSettingsOpen(true)} />
                 </div>
                 <button
                   onClick={() => setSidebarCollapsed(true)}
@@ -725,7 +725,7 @@ export default function App() {
       </div>
 
       {/* Settings modal */}
-      <Settings open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <Settings open={settingsOpen} onClose={() => { setSettingsOpen(false); setKeyPresent(hasApiKey()); }} />
     </div>
   );
 }
