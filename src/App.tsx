@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { PanelLeftClose, PanelLeftOpen } from 'lucide-react';
+import { ChevronRight } from 'lucide-react';
 import type { ConversionJob, HistoryEntry, LogEntry } from './types';
 import { createJob } from './types';
 import { hasApiKey, getApiKey } from './lib/apiKey';
@@ -10,7 +10,7 @@ import { getSettings, saveSettings } from './lib/settings';
 import { getProvider } from './lib/providers/registry';
 import { OpenRouterProvider } from './lib/providers/openrouter';
 import Header from './components/Header';
-import ProviderBanner from './components/ProviderBanner';
+import Welcome from './components/Welcome';
 import FileDropZone from './components/FileDropZone';
 import Queue from './components/Queue';
 import History from './components/History';
@@ -34,6 +34,10 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [paused, setPaused] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarWidth, setSidebarWidth] = useState(() =>
+    parseInt(localStorage.getItem('sidebar_width') || '420', 10),
+  );
+  const isDraggingRef = useRef(false);
   const pausedRef = useRef(false);
   const processingRef = useRef(false);
   const historyRef = useRef(history);
@@ -48,6 +52,39 @@ export default function App() {
 
   const toggleTheme = useCallback(() => {
     setTheme(t => (t === 'dark' ? 'light' : 'dark'));
+  }, []);
+
+  // ── Sidebar resize ────────────────────────────────────────────────────────
+  useEffect(() => {
+    localStorage.setItem('sidebar_width', String(sidebarWidth));
+  }, [sidebarWidth]);
+
+  const handleDragStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    isDraggingRef.current = true;
+    const startX = e.clientX;
+    const startWidth = sidebarWidth;
+
+    const onMove = (ev: MouseEvent) => {
+      if (!isDraggingRef.current) return;
+      const newWidth = Math.min(600, Math.max(280, startWidth + (ev.clientX - startX)));
+      setSidebarWidth(newWidth);
+    };
+    const onUp = () => {
+      isDraggingRef.current = false;
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  }, [sidebarWidth]);
+
+  const handleSeparatorDoubleClick = useCallback(() => {
+    setSidebarCollapsed(prev => !prev);
   }, []);
 
   // ── Job updates ────────────────────────────────────────────────────────────
@@ -760,42 +797,20 @@ export default function App() {
     <div className="flex flex-col h-screen bg-p-bg">
       <Header
         theme={theme}
+        keyPresent={keyPresent}
         onToggleTheme={toggleTheme}
         onOpenSettings={() => setSettingsOpen(true)}
       />
 
       <div className="flex-1 flex overflow-hidden">
         {/* Left panel: controls + queue/history */}
-        <div className={`flex flex-col border-r border-p-border overflow-hidden sidebar-transition ${
-          sidebarCollapsed ? 'w-12' : 'w-full lg:w-[420px]'
-        }`}>
-          {sidebarCollapsed ? (
-            <div className="flex flex-col items-center pt-4">
-              <button
-                onClick={() => setSidebarCollapsed(false)}
-                className="p-2.5 rounded-lg text-p-text-muted hover:text-p-text hover:bg-p-surface-hover tab-transition"
-                title="Expand sidebar"
-              >
-                <PanelLeftOpen className="w-5 h-5" />
-              </button>
-            </div>
-          ) : (
+        <div
+          className="flex flex-col overflow-hidden sidebar-transition"
+          style={{ width: sidebarCollapsed ? 0 : sidebarWidth, minWidth: sidebarCollapsed ? 0 : 280 }}
+        >
+          {!sidebarCollapsed && (
             <>
-              {/* Collapse button + provider banner row */}
-              <div className="flex items-center gap-2 px-4 pt-4 pb-2 shrink-0">
-                <div className="flex-1 min-w-0">
-                  <ProviderBanner onOpenSettings={() => setSettingsOpen(true)} />
-                </div>
-                <button
-                  onClick={() => setSidebarCollapsed(true)}
-                  className="p-2.5 rounded-lg text-p-text-muted hover:text-p-text hover:bg-p-surface-hover tab-transition shrink-0"
-                  title="Collapse sidebar"
-                >
-                  <PanelLeftClose className="w-5 h-5" />
-                </button>
-              </div>
-
-              <div className="px-4 pb-4 shrink-0">
+              <div className="px-4 pt-4 pb-4 shrink-0">
                 <FileDropZone onFilesAdded={addFiles} disabled={!keyPresent} />
               </div>
 
@@ -873,9 +888,26 @@ export default function App() {
           )}
         </div>
 
+        {/* Drag handle / separator */}
+        <div
+          className={`hidden lg:flex items-center justify-center border-l border-r border-p-border hover:bg-p-accent/10 tab-transition ${
+            sidebarCollapsed ? 'w-6 cursor-pointer' : 'w-1.5 cursor-col-resize'
+          }`}
+          onMouseDown={sidebarCollapsed ? undefined : handleDragStart}
+          onDoubleClick={handleSeparatorDoubleClick}
+          onClick={sidebarCollapsed ? () => setSidebarCollapsed(false) : undefined}
+          title={sidebarCollapsed ? 'Expand sidebar' : 'Drag to resize, double-click to collapse'}
+        >
+          {sidebarCollapsed && (
+            <ChevronRight className="w-3.5 h-3.5 text-p-text-dim" />
+          )}
+        </div>
+
         {/* Right panel: preview */}
         <div className="hidden lg:flex flex-1 flex-col bg-p-bg-deep min-w-0">
-          {showQueuePreview ? (
+          {!keyPresent ? (
+            <Welcome onOpenSettings={() => setSettingsOpen(true)} />
+          ) : showQueuePreview ? (
             <Preview job={previewJob} />
           ) : showHistoryPreview ? (
             <Preview
