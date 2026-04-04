@@ -165,6 +165,16 @@ export default function QueueItem({
 
       {/* Actions */}
       <div className="flex items-center gap-0.5 shrink-0">
+        {/* Live preview — show eye during conversion when partial markdown exists */}
+        {job.status === 'converting' && job.markdown && (
+          <button
+            onClick={() => onPreview(job.id)}
+            className="p-1.5 rounded-md text-p-accent hover:bg-p-surface-hover tab-transition"
+            title="Live preview"
+          >
+            <Eye className="w-3.5 h-3.5" />
+          </button>
+        )}
         {job.status === 'done' && (
           <>
             <button
