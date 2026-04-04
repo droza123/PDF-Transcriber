@@ -46,15 +46,17 @@ export default function HistoryItem({ entry, isActive, onPreview, onShowInFolder
       <FileText className="w-4 h-4 text-p-text-dim shrink-0" />
 
       <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium text-p-text truncate" title={entry.fileName}>{entry.fileName}</p>
+        <div className="flex items-center gap-1.5">
+          <p className="text-sm font-medium text-p-text truncate" title={entry.fileName}>{entry.fileName}</p>
+          {entry.translationLanguage && (
+            <span className="badge badge-accent shrink-0">{'\u2192'} {entry.translationLanguage}</span>
+          )}
+        </div>
         <p className="text-xs text-p-text-muted truncate">
           {formatDate(entry.convertedAt)}
           {entry.totalPages > 0 && <>{' \u00b7 '}{entry.totalPages} pages</>}
           {' \u00b7 '}
           {formatDuration(entry.durationMs)}
-          {entry.translationLanguage && (
-            <span className="text-p-accent">{' \u00b7 \u2192 '}{entry.translationLanguage}</span>
-          )}
         </p>
 
         {/* Language picker dropdown */}
