@@ -638,27 +638,48 @@ export default function App() {
   }, []);
 
   const retryJob = useCallback(
-    (id: string) => {
+    async (id: string) => {
+      // Check if there's saved progress to resume from
+      const progress = await window.electronAPI?.loadProgress(id);
       setJobs(prev =>
-        prev.map(j =>
-          j.id === id
-            ? {
-                ...j,
-                status: 'queued' as const,
-                phase: 'scanning' as const,
-                progress: 0,
-                currentBatch: 0,
-                statusMessage: 'Queued (retry)',
-                error: null,
-                markdown: null,
-                startedAt: null,
-                completedAt: null,
-                resumeFrom: undefined,
-              }
-            : j,
-        ),
+        prev.map(j => {
+          if (j.id !== id) return j;
+          if (progress && progress.completedBatches > 0) {
+            // Resume from saved progress
+            return {
+              ...j,
+              status: 'queued' as const,
+              phase: 'converting' as const,
+              progress: Math.round((progress.completedBatches / progress.totalBatches) * 100),
+              currentBatch: progress.completedBatches,
+              totalBatches: progress.totalBatches,
+              statusMessage: `Queued (resuming from ${progress.completedBatches}/${progress.totalBatches})`,
+              error: null,
+              startedAt: null,
+              completedAt: null,
+              resumeFrom: progress.completedBatches,
+              markdown: progress.results.length ? progress.results.join('\n\n') : j.markdown,
+            };
+          }
+          // No progress — full restart
+          return {
+            ...j,
+            status: 'queued' as const,
+            phase: 'scanning' as const,
+            progress: 0,
+            currentBatch: 0,
+            statusMessage: 'Queued (retry)',
+            error: null,
+            markdown: null,
+            startedAt: null,
+            completedAt: null,
+            resumeFrom: undefined,
+          };
+        }),
       );
-      window.electronAPI?.deleteProgress(id);
+      if (!progress || progress.completedBatches === 0) {
+        window.electronAPI?.deleteProgress(id);
+      }
       setTimeout(processQueue, 50);
     },
     [processQueue],
