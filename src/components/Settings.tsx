@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { X, GripVertical, RefreshCw, Info, Eye, EyeOff, Trash2, ExternalLink, Loader2, CheckCircle2, AlertTriangle, Cpu, FileOutput, SlidersHorizontal } from 'lucide-react';
+import { X, GripVertical, RefreshCw, Info, Eye, EyeOff, Trash2, ExternalLink, Loader2, CheckCircle2, AlertTriangle, Cpu, FileOutput, SlidersHorizontal, ArrowRight } from 'lucide-react';
 import { DndContext, closestCenter, type DragEndEvent } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -62,6 +62,7 @@ function SortableModelItem({
   canRemove,
   skipReason,
   pricingBadge,
+  onDelete,
 }: {
   model: string;
   index: number;
@@ -69,6 +70,7 @@ function SortableModelItem({
   canRemove: boolean;
   skipReason?: string;
   pricingBadge?: React.ReactNode;
+  onDelete?: (model: string) => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition } = useSortable({ id: model });
   const isDragging = !!transform;
@@ -92,19 +94,30 @@ function SortableModelItem({
       >
         <GripVertical className="w-3.5 h-3.5" />
       </button>
-      <input
-        type="checkbox"
-        checked
-        onChange={() => canRemove && onToggle(model)}
-        className="shrink-0 accent-p-accent"
-        title={canRemove ? 'Deselect model' : 'At least one model must be selected'}
-      />
+      {!onDelete && (
+        <input
+          type="checkbox"
+          checked
+          onChange={() => canRemove && onToggle(model)}
+          className="shrink-0 accent-p-accent"
+          title={canRemove ? 'Deselect model' : 'At least one model must be selected'}
+        />
+      )}
       <span className="flex-1 text-sm text-p-text truncate">{model}</span>
       {pricingBadge}
       {skipReason && <SkippedBadge reason={skipReason} />}
       <span className="badge badge-accent shrink-0">
         {index + 1}
       </span>
+      {onDelete && (
+        <button
+          onClick={() => onDelete(model)}
+          className="text-p-text-dim hover:text-p-error shrink-0 opacity-0 group-hover:opacity-100 tab-transition"
+          title="Remove model"
+        >
+          <Trash2 className="w-3.5 h-3.5" />
+        </button>
+      )}
     </div>
   );
 }
@@ -190,6 +203,27 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
       setModelPriority(prev => {
         const stillAvailable = prev.filter(m => result.models.includes(m));
         return stillAvailable.length > 0 ? stillAvailable : [result.models[0]];
+      });
+    }
+    setRefreshing(false);
+  }
+
+  async function handleCustomConnect() {
+    if (!customBaseUrl.trim()) return;
+    saveSettings({ customBaseUrl: customBaseUrl.trim() });
+    setRefreshing(true);
+    const provider = getProvider('custom');
+    const key = getApiKey('custom') || '';
+    const models = await provider.fetchModels(key);
+    if (models.length > 0) {
+      const ids = models.map(m => m.id);
+      setCachedModels(ids);
+      setModelPriority(ids);
+      setCustomModels(ids);
+      const settings = getSettings();
+      saveSettings({
+        customModels: ids,
+        providerModelPriority: { ...settings.providerModelPriority, custom: ids },
       });
     }
     setRefreshing(false);
@@ -283,6 +317,20 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
     setValidationResult(null);
   }
 
+  function deleteCustomModel(model: string) {
+    setModelPriority(prev => {
+      const next = prev.filter(m => m !== model);
+      const nextCustom = customModels.filter(m => m !== model);
+      setCustomModels(nextCustom);
+      const settings = getSettings();
+      saveSettings({
+        customModels: nextCustom,
+        providerModelPriority: { ...settings.providerModelPriority, custom: next },
+      });
+      return next;
+    });
+  }
+
   // Debounce outputNotes saves
   useEffect(() => {
     if (!open) return;
@@ -323,7 +371,13 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
         next = [...prev, model];
       }
       const settings = getSettings();
-      saveSettings({ providerModelPriority: { ...settings.providerModelPriority, [selectedProvider]: next } });
+      const save: Partial<typeof settings> = { providerModelPriority: { ...settings.providerModelPriority, [selectedProvider]: next } };
+      if (selectedProvider === 'custom') {
+        const nextCustom = next;
+        setCustomModels(nextCustom);
+        save.customModels = nextCustom;
+      }
+      saveSettings(save);
       return next;
     });
   }
@@ -536,7 +590,7 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
                       <ol className="list-decimal list-inside space-y-0.5 pl-1">
                         {provider.keyHelpSteps.map((step, i) => (
                           <li key={i}>
-                            {i === 0 ? (
+                            {i === 0 && provider.keyHelpUrl ? (
                               <>
                                 Go to{' '}
                                 <a
@@ -563,94 +617,29 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
 
           {/* Custom provider config */}
           {selectedProvider === 'custom' && (
-            <div className="section-divider space-y-3">
-              <div>
-                <label className="section-label block mb-1">Base URL</label>
+            <div className="section-divider">
+              <label className="section-label block mb-1">Base URL</label>
+              <div className="flex items-center gap-2">
                 <input
                   type="text"
                   value={customBaseUrl}
                   onChange={e => setCustomBaseUrl(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && handleCustomConnect()}
                   placeholder="http://localhost:11434/v1"
-                  className="w-full input-base"
+                  className="flex-1 input-base"
                 />
-                <p className="text-[10px] text-p-text-dim/60 mt-1">
-                  OpenAI-compatible endpoint (e.g. http://localhost:11434/v1 for Ollama)
-                </p>
+                <button
+                  onClick={handleCustomConnect}
+                  disabled={refreshing || !customBaseUrl.trim()}
+                  className="p-2 rounded-lg bg-p-accent/12 text-p-accent hover:bg-p-accent/20 disabled:opacity-30 tab-transition"
+                  title="Connect and fetch models"
+                >
+                  {refreshing ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowRight className="w-4 h-4" />}
+                </button>
               </div>
-              <div>
-                <label className="section-label block mb-1">Model names</label>
-                <div className="rounded-lg border border-p-border bg-p-bg-deep overflow-y-auto max-h-28">
-                  {customModels.map(model => (
-                    <div key={model} className="flex items-center justify-between px-2 py-1.5 hover:bg-p-surface-hover">
-                      <span className="text-sm text-p-text truncate">{model}</span>
-                      <button
-                        onClick={() => {
-                          const next = customModels.filter(m => m !== model);
-                          setCustomModels(next);
-                          setModelPriority(prev => prev.filter(m => m !== model));
-                          const settings = getSettings();
-                          saveSettings({
-                            customModels: next,
-                            providerModelPriority: { ...settings.providerModelPriority, custom: next },
-                          });
-                        }}
-                        className="text-xs text-p-text-dim hover:text-p-error px-1"
-                        title="Remove model"
-                      >
-                        <X className="w-3 h-3" />
-                      </button>
-                    </div>
-                  ))}
-                  {customModels.length === 0 && (
-                    <p className="text-xs text-p-text-dim px-2 py-2">No models configured. Add model names below.</p>
-                  )}
-                </div>
-                <div className="flex items-center gap-2 mt-2">
-                  <input
-                    type="text"
-                    value={newCustomModel}
-                    onChange={e => setNewCustomModel(e.target.value)}
-                    onKeyDown={e => {
-                      if (e.key === 'Enter' && newCustomModel.trim()) {
-                        const name = newCustomModel.trim();
-                        if (!customModels.includes(name)) {
-                          const next = [...customModels, name];
-                          setCustomModels(next);
-                          setModelPriority(next);
-                          const settings = getSettings();
-                          saveSettings({
-                            customModels: next,
-                            providerModelPriority: { ...settings.providerModelPriority, custom: next },
-                          });
-                        }
-                        setNewCustomModel('');
-                      }
-                    }}
-                    placeholder="Add a model name..."
-                    className="flex-1 input-base py-1.5"
-                  />
-                  <button
-                    onClick={() => {
-                      const name = newCustomModel.trim();
-                      if (name && !customModels.includes(name)) {
-                        const next = [...customModels, name];
-                        setCustomModels(next);
-                        setModelPriority(next);
-                        const settings = getSettings();
-                        saveSettings({
-                          customModels: next,
-                          providerModelPriority: { ...settings.providerModelPriority, custom: next },
-                        });
-                      }
-                      setNewCustomModel('');
-                    }}
-                    disabled={!newCustomModel.trim()}
-                    className="px-3 py-1.5 rounded-lg text-xs font-medium bg-p-accent/12 text-p-accent hover:bg-p-accent/20 disabled:opacity-30 tab-transition"
-                  >
-                    Add
-                  </button>
-                </div>
-              </div>
+              <p className="text-[10px] text-p-text-dim/60 mt-1">
+                Ollama: localhost:11434/v1 &middot; LM Studio: localhost:1234/v1 &middot; Together AI: api.together.xyz/v1
+              </p>
             </div>
           )}
 
@@ -732,6 +721,7 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
                       canRemove={modelPriority.length > 1}
                       skipReason={skippedModels.get(model)}
                       pricingBadge={getPricingBadge(model, openrouterModelData)}
+                      onDelete={selectedProvider === 'custom' ? deleteCustomModel : undefined}
                     />
                   ))}
                 </SortableContext>
@@ -763,6 +753,55 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
                 </>
               )}
             </div>
+
+            {/* Add model input for custom provider */}
+            {selectedProvider === 'custom' && (
+              <div className="flex items-center gap-2 mt-2">
+                <input
+                  type="text"
+                  value={newCustomModel}
+                  onChange={e => setNewCustomModel(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' && newCustomModel.trim()) {
+                      const name = newCustomModel.trim();
+                      if (!modelPriority.includes(name)) {
+                        const next = [...modelPriority, name];
+                        setModelPriority(next);
+                        setCustomModels(next);
+                        const settings = getSettings();
+                        saveSettings({
+                          customModels: next,
+                          providerModelPriority: { ...settings.providerModelPriority, custom: next },
+                        });
+                      }
+                      setNewCustomModel('');
+                    }
+                  }}
+                  placeholder="Add a model name..."
+                  className="flex-1 input-base py-1.5"
+                />
+                <button
+                  onClick={() => {
+                    const name = newCustomModel.trim();
+                    if (name && !modelPriority.includes(name)) {
+                      const next = [...modelPriority, name];
+                      setModelPriority(next);
+                      setCustomModels(next);
+                      const settings = getSettings();
+                      saveSettings({
+                        customModels: next,
+                        providerModelPriority: { ...settings.providerModelPriority, custom: next },
+                      });
+                    }
+                    setNewCustomModel('');
+                  }}
+                  disabled={!newCustomModel.trim()}
+                  className="px-3 py-1.5 rounded-lg text-xs font-medium bg-p-accent/12 text-p-accent hover:bg-p-accent/20 disabled:opacity-30 tab-transition"
+                >
+                  Add
+                </button>
+              </div>
+            )}
           </div>
 
           </>}

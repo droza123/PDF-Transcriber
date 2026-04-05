@@ -30,7 +30,14 @@ export function clearApiKey(provider: ProviderId): void {
 }
 
 export function hasApiKey(provider?: ProviderId): boolean {
-  return !!getApiKey(provider);
+  const p = provider ?? getSettings().activeProvider;
+  // Custom provider doesn't require an API key — treat it as configured
+  // if models have been set up (user has connected to a server)
+  if (p === 'custom') {
+    const { customModels } = getSettings();
+    return customModels.length > 0 || !!getApiKey(p);
+  }
+  return !!getApiKey(p);
 }
 
 /** Get cached available models for a provider. */

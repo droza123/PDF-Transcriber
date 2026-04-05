@@ -1,5 +1,6 @@
 import type { Provider, ProviderCallOptions, ProviderModel, ProviderResult } from './types';
 import { getSettings } from '../settings';
+import { pdfToImages } from '../pdfImages';
 
 export class CustomProvider implements Provider {
   readonly id = 'custom' as const;
@@ -7,9 +8,9 @@ export class CustomProvider implements Provider {
   readonly keyPlaceholder = 'API key (leave empty for local servers)';
   readonly keyHelpUrl = '';
   readonly keyHelpSteps = [
-    'Configure the base URL and model names below',
-    'Enter an API key if required by your server',
-    'The endpoint must be OpenAI-compatible (/v1/chat/completions)',
+    'Local servers (Ollama, LM Studio) usually don\u2019t need a key \u2014 leave it empty',
+    'Cloud providers (Together AI, Groq, etc.) require a key from their dashboard',
+    'Set the base URL below to match your provider\u2019s OpenAI-compatible endpoint',
   ];
   readonly defaultModels: string[] = [];
   readonly batchDelayMs = 1000;
@@ -65,26 +66,20 @@ export class CustomProvider implements Provider {
 
     onStreamProgress?.('uploading', 0);
 
-    const arrayBuffer = await pdfBlob.arrayBuffer();
-    const bytes = new Uint8Array(arrayBuffer);
-    let binary = '';
-    for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
-    const base64 = btoa(binary);
+    // Convert PDF pages to images since most local servers (Ollama, LM Studio)
+    // only support image_url content, not PDF file uploads
+    const imageDataUrls = await pdfToImages(pdfBlob);
 
     if (abortSignal?.aborted) throw new DOMException('Cancelled', 'AbortError');
 
-    const sizeMB = (pdfBlob.size / 1024 / 1024).toFixed(1);
-    console.log(`[custom] Sending ${sizeMB} MB PDF as base64 to ${model} at ${baseUrl}`);
+    console.log(`[custom] Sending ${imageDataUrls.length} page image(s) to ${model} at ${baseUrl}`);
     onStreamProgress?.('streaming', 0);
 
     const content: any[] = [
-      {
-        type: 'file',
-        file: {
-          filename: 'document.pdf',
-          file_data: `data:application/pdf;base64,${base64}`,
-        },
-      },
+      ...imageDataUrls.map(url => ({
+        type: 'image_url',
+        image_url: { url },
+      })),
       { type: 'text', text: prompt },
     ];
 
