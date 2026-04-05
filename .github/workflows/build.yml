@@ -18,7 +18,7 @@ jobs:
 
       - run: npm ci
 
-      - run: npm run electron:build
+      - run: npx vite build && npx electron-builder --win --publish never
 
       - uses: actions/upload-artifact@v4
         with:
@@ -37,7 +37,7 @@ jobs:
 
       - run: npm ci
 
-      - run: npx vite build && npx electron-builder --mac
+      - run: npx vite build && npx electron-builder --mac --publish never
 
       - uses: actions/upload-artifact@v4
         with:
