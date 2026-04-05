@@ -156,6 +156,7 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
   const [customBaseUrl, setCustomBaseUrl] = useState('');
   const [customModels, setCustomModels] = useState<string[]>([]);
   const [newCustomModel, setNewCustomModel] = useState('');
+  const [customConnected, setCustomConnected] = useState(false);
 
   useEffect(() => {
     if (open) {
@@ -179,6 +180,7 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
       setFreeOnlyFilter(true);
       setCustomBaseUrl(s.customBaseUrl || 'http://localhost:11434/v1');
       setCustomModels(s.customModels || []);
+      setCustomConnected((s.customModels || []).length > 0);
       // Reset key editing state
       setEditingKey(false);
       setKeyValue('');
@@ -220,6 +222,7 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
       setCachedModels(ids);
       setModelPriority(ids);
       setCustomModels(ids);
+      setCustomConnected(true);
       const settings = getSettings();
       saveSettings({
         customModels: ids,
@@ -473,7 +476,7 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
                     }`}
                   >
                     {p.displayName}
-                    {keyConfigured && !isSelected && (
+                    {keyConfigured && (
                       <span className="ml-1 text-p-success">&#x2713;</span>
                     )}
                   </button>
@@ -637,9 +640,16 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
                   {refreshing ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowRight className="w-4 h-4" />}
                 </button>
               </div>
-              <p className="text-[10px] text-p-text-dim/60 mt-1">
-                Ollama: localhost:11434/v1 &middot; LM Studio: localhost:1234/v1 &middot; Together AI: api.together.xyz/v1
-              </p>
+              <div className="flex items-center gap-2 mt-1">
+                <p className="text-[10px] text-p-text-dim/60">
+                  Ollama: localhost:11434/v1 &middot; LM Studio: localhost:1234/v1 &middot; Together AI: api.together.xyz/v1
+                </p>
+                {customConnected && (
+                  <span className="text-xs text-p-success flex items-center gap-1 shrink-0">
+                    <CheckCircle2 className="w-3 h-3" /> Connected
+                  </span>
+                )}
+              </div>
             </div>
           )}
 
