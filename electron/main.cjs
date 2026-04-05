@@ -6,6 +6,22 @@ const { Worker } = require('worker_threads');
 let mainWindow;
 let powerSaveBlockerId = null;
 
+// ── Migrate user data from old app name ─────────────────────────────────────
+const oldDataDir = path.join(path.dirname(app.getPath('userData')), 'pdf-to-markdown-batch');
+const newDataDir = app.getPath('userData');
+if (oldDataDir !== newDataDir && fs.existsSync(oldDataDir) && !fs.existsSync(path.join(newDataDir, '.migrated'))) {
+  const entries = fs.readdirSync(oldDataDir);
+  for (const entry of entries) {
+    const src = path.join(oldDataDir, entry);
+    const dest = path.join(newDataDir, entry);
+    if (!fs.existsSync(dest)) {
+      fs.cpSync(src, dest, { recursive: true });
+    }
+  }
+  fs.writeFileSync(path.join(newDataDir, '.migrated'), 'migrated from pdf-to-markdown-batch');
+  console.log(`[migration] Migrated user data from ${oldDataDir}`);
+}
+
 // ── Persistence paths ────────────────────────────────────────────────────────
 const userDataPath = app.getPath('userData');
 const historyPath = path.join(userDataPath, 'history.json');

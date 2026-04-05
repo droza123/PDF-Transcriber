@@ -1,7 +1,7 @@
 {
-  "name": "pdf-to-markdown-batch",
+  "name": "pdf-transformer",
   "private": true,
-  "version": "1.32.2",
+  "version": "1.32.3",
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
@@ -48,7 +48,7 @@
     "wait-on": "^8.0.3"
   },
   "build": {
-    "appId": "com.pdftomarkdown.batch",
+    "appId": "com.pdftransformer.app",
     "productName": "PDF Transcriber",
     "directories": {
       "output": "release"
@@ -59,6 +59,10 @@
     ],
     "win": {
       "target": "nsis"
+    },
+    "mac": {
+      "target": "dmg",
+      "category": "public.app-category.productivity"
     },
     "nsis": {
       "oneClick": false,
