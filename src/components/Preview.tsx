@@ -11,6 +11,7 @@ interface PreviewProps {
   fileName?: string;
   savedPath?: string | null;
   sourcePath?: string | null;
+  onOpenMarkdown?: () => void;
 }
 
 const INITIAL_CHUNKS = 10;
@@ -50,7 +51,7 @@ const MarkdownChunk = memo(function MarkdownChunk({ content, startHeadingIndex }
   );
 });
 
-export default function Preview({ job, markdown: externalMd, fileName: externalName, savedPath: externalSavedPath, sourcePath: externalSourcePath }: PreviewProps) {
+export default function Preview({ job, markdown: externalMd, fileName: externalName, savedPath: externalSavedPath, sourcePath: externalSourcePath, onOpenMarkdown }: PreviewProps) {
   const [tab, setTab] = useState<'raw' | 'rendered'>('rendered');
   const [copied, setCopied] = useState(false);
   const [sideBySide, setSideBySide] = useState(false);
@@ -389,17 +390,18 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
               <Columns2 className="w-3.5 h-3.5" />
             </button>
           )}
-          <button
-            onClick={() => setOutlineOpen(v => !v)}
-            className={`tab-underline text-xs tab-transition ${
-              outlineOpen ? 'tab-underline-active' : 'text-p-text-dim hover:text-p-text'
-            }`}
-            title={outlineOpen ? 'Hide outline' : 'Show outline'}
-          >
-            <ListTree className="w-3.5 h-3.5" />
-          </button>
         </div>
         <div className="flex items-center gap-1.5">
+          {onOpenMarkdown && (
+            <button
+              onClick={onOpenMarkdown}
+              className="btn-ghost"
+              title="Open another markdown file..."
+            >
+              <FolderOpen className="w-3 h-3" />
+              Open
+            </button>
+          )}
           <button
             onClick={() => { setFindOpen(true); setTimeout(() => findInputRef.current?.focus(), 50); }}
             className="btn-ghost"
@@ -509,6 +511,15 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
 
       {/* Quality stats */}
       <div className="flex items-center gap-4 px-4 py-2 border-b border-p-border-subtle text-xs text-p-text-dim shrink-0">
+        <button
+          onClick={() => setOutlineOpen(v => !v)}
+          className={`flex items-center gap-1 tab-transition rounded px-1 -mx-1 ${
+            outlineOpen ? 'text-p-accent' : 'text-p-text-dim hover:text-p-text'
+          }`}
+          title={outlineOpen ? 'Hide outline' : 'Show outline'}
+        >
+          <ListTree className="w-3 h-3" /> Outline
+        </button>
         <span className="flex items-center gap-1" title="Page markers found">
           <Hash className="w-3 h-3" /> {stats.pageMarkers} pages
         </span>

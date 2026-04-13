@@ -1015,6 +1015,7 @@ export default function App() {
               fileName={openedFile!.fileName}
               savedPath={openedFile!.filePath}
               sourcePath={null}
+              onOpenMarkdown={window.electronAPI?.openMarkdownFile ? handleOpenMarkdown : undefined}
             />
           ) : !keyPresent ? (
             <Welcome
@@ -1025,13 +1026,17 @@ export default function App() {
               }}
             />
           ) : showQueuePreview ? (
-            <Preview job={previewJob} />
+            <Preview
+              job={previewJob}
+              onOpenMarkdown={window.electronAPI?.openMarkdownFile ? handleOpenMarkdown : undefined}
+            />
           ) : showHistoryPreview ? (
             <Preview
               markdown={historyMarkdown!}
               fileName={previewHistoryEntry!.fileName}
               savedPath={previewHistoryEntry!.savedPath}
               sourcePath={previewHistoryEntry!.sourcePath}
+              onOpenMarkdown={window.electronAPI?.openMarkdownFile ? handleOpenMarkdown : undefined}
             />
           ) : (
             <div className="flex-1 flex flex-col items-center justify-center text-p-text-dim text-sm relative z-10 gap-4">
