@@ -1,4 +1,4 @@
-import { Sun, Moon, Settings2 } from 'lucide-react';
+import { Sun, Moon, Settings2, FolderOpen } from 'lucide-react';
 import { hasApiKey, getApiKey } from '../lib/apiKey';
 import { getSettings } from '../lib/settings';
 import { getAllProviders } from '../lib/providers/registry';
@@ -9,9 +9,10 @@ interface HeaderProps {
   keyPresent: boolean;
   onToggleTheme: () => void;
   onOpenSettings: () => void;
+  onOpenMarkdown?: () => void;
 }
 
-export default function Header({ theme, keyPresent, onToggleTheme, onOpenSettings }: HeaderProps) {
+export default function Header({ theme, keyPresent, onToggleTheme, onOpenSettings, onOpenMarkdown }: HeaderProps) {
   const activeProvider = keyPresent
     ? getAllProviders().find(p => p.id === getSettings().activeProvider)
     : null;
@@ -49,6 +50,15 @@ export default function Header({ theme, keyPresent, onToggleTheme, onOpenSetting
             className="btn-primary text-xs py-1.5"
           >
             Set up API
+          </button>
+        )}
+        {onOpenMarkdown && (
+          <button
+            onClick={onOpenMarkdown}
+            className="p-2 rounded-lg text-p-text-dim hover:text-p-accent hover:bg-p-surface-hover tab-transition"
+            title="Open markdown file..."
+          >
+            <FolderOpen className="w-4 h-4" />
           </button>
         )}
         <button

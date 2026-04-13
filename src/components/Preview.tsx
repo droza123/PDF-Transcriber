@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo, memo, startTransition } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Copy, Check, Download, FolderOpen, Hash, Table2, BookOpen, Footprints, Search, X, ChevronDown, ChevronUp, Columns2, FileText, Loader2, Radio } from 'lucide-react';
+import { Copy, Check, Download, FolderOpen, Hash, Table2, BookOpen, Footprints, Search, X, ChevronDown, ChevronUp, Columns2, FileText, Loader2, Radio, ListTree } from 'lucide-react';
 import type { ConversionJob } from '../types';
 import { downloadMarkdown, showInFolder, exportAsHtml, exportAsJson, exportAsDocx } from '../lib/download';
 
@@ -17,7 +17,15 @@ const INITIAL_CHUNKS = 10;
 const CHUNKS_PER_LOAD = 10;
 
 /** A single chunk of markdown, memoized so it never re-renders unless content changes. */
-const MarkdownChunk = memo(function MarkdownChunk({ content }: { content: string }) {
+const MarkdownChunk = memo(function MarkdownChunk({ content, startHeadingIndex }: { content: string; startHeadingIndex: number }) {
+  // Local counter — incremented as headings render in document order within this chunk.
+  // Reset on every render so re-renders produce the same IDs deterministically.
+  const counter = { n: 0 };
+  const heading = (level: number) => (props: any) => {
+    const id = `md-heading-${startHeadingIndex + counter.n++}`;
+    const Tag = `h${level}` as any;
+    return <Tag id={id} {...props} />;
+  };
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
@@ -29,6 +37,12 @@ const MarkdownChunk = memo(function MarkdownChunk({ content }: { content: string
           }
           return <code className={className} {...props}>{children}</code>;
         },
+        h1: heading(1),
+        h2: heading(2),
+        h3: heading(3),
+        h4: heading(4),
+        h5: heading(5),
+        h6: heading(6),
       }}
     >
       {content}
@@ -45,7 +59,12 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
   const [findText, setFindText] = useState('');
   const [exportOpen, setExportOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [outlineOpen, setOutlineOpen] = useState<boolean>(() => localStorage.getItem('outline_open') === '1');
   const findInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    localStorage.setItem('outline_open', outlineOpen ? '1' : '0');
+  }, [outlineOpen]);
 
   const md = job?.markdown ?? externalMd ?? '';
   const fileName = job?.fileName ?? externalName ?? 'document.pdf';
@@ -69,6 +88,31 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
     [body],
   );
 
+  // Build document outline from body headings (skip code blocks)
+  const outline = useMemo(() => {
+    const items: { level: number; text: string; index: number }[] = [];
+    const lines = body.split('\n');
+    let inFence = false;
+    let i = 0;
+    for (const line of lines) {
+      if (/^```/.test(line.trim())) { inFence = !inFence; continue; }
+      if (inFence) continue;
+      const m = line.match(/^(#{1,6})\s+(.+?)\s*#*\s*$/);
+      if (m) {
+        // Strip basic inline markdown for the outline label
+        const label = m[2]
+          .replace(/`([^`]+)`/g, '$1')
+          .replace(/\*\*([^*]+)\*\*/g, '$1')
+          .replace(/\*([^*]+)\*/g, '$1')
+          .replace(/_([^_]+)_/g, '$1')
+          .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+          .trim();
+        items.push({ level: m[1].length, text: label, index: i++ });
+      }
+    }
+    return items;
+  }, [body]);
+
   // Split renderedBody into chunks by page markers for progressive rendering
   const chunks = useMemo(() => {
     const split = renderedBody.split(/(?=`<!-- page:)/);
@@ -88,6 +132,24 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
     if (current) parts.push(current);
     return parts.length > 0 ? parts : [renderedBody];
   }, [renderedBody]);
+
+  // For each chunk, the index of the first heading that appears in it.
+  // Used to assign stable, document-order IDs to rendered headings across chunks.
+  const chunkHeadingStarts = useMemo(() => {
+    const starts: number[] = [];
+    let total = 0;
+    for (const ch of chunks) {
+      starts.push(total);
+      const chLines = ch.split('\n');
+      let inFence = false;
+      for (const line of chLines) {
+        if (/^```/.test(line.trim())) { inFence = !inFence; continue; }
+        if (inFence) continue;
+        if (/^#{1,6}\s+\S/.test(line)) total++;
+      }
+    }
+    return starts;
+  }, [chunks]);
 
   // Progressive chunk loading
   const [loadedCount, setLoadedCount] = useState(INITIAL_CHUNKS);
@@ -132,6 +194,27 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   }
+
+  // Scroll to a heading by its document-order index. Forces rendered tab and
+  // loads enough chunks for the target heading to be in the DOM.
+  const scrollToHeading = useCallback((index: number) => {
+    if (tab !== 'rendered') setTab('rendered');
+
+    // Find the chunk that contains this heading.
+    let targetChunk = 0;
+    for (let i = chunkHeadingStarts.length - 1; i >= 0; i--) {
+      if (chunkHeadingStarts[i] <= index) { targetChunk = i; break; }
+    }
+    if (loadedCount <= targetChunk) {
+      setLoadedCount(Math.min(targetChunk + 1, chunks.length));
+    }
+
+    // Scroll after React commits any needed tab/loaded-count changes.
+    setTimeout(() => {
+      const el = document.getElementById(`md-heading-${index}`);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 60);
+  }, [tab, chunkHeadingStarts, loadedCount, chunks.length]);
 
   // ── Find in page ───────────────────────────────────────────────────────────
   const [findActiveIndex, setFindActiveIndex] = useState(0);
@@ -306,6 +389,15 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
               <Columns2 className="w-3.5 h-3.5" />
             </button>
           )}
+          <button
+            onClick={() => setOutlineOpen(v => !v)}
+            className={`tab-underline text-xs tab-transition ${
+              outlineOpen ? 'tab-underline-active' : 'text-p-text-dim hover:text-p-text'
+            }`}
+            title={outlineOpen ? 'Hide outline' : 'Show outline'}
+          >
+            <ListTree className="w-3.5 h-3.5" />
+          </button>
         </div>
         <div className="flex items-center gap-1.5">
           <button
@@ -448,7 +540,44 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
       )}
 
       {/* Content */}
-      <div className={`flex-1 overflow-hidden ${sideBySide ? 'flex' : ''}`}>
+      <div className={`flex-1 overflow-hidden flex`}>
+        {/* Outline sidebar */}
+        {outlineOpen && (
+          <aside className="w-60 border-r border-p-border overflow-auto shrink-0 bg-p-surface/30">
+            <div className="sticky top-0 px-3 py-2 border-b border-p-border bg-p-surface text-xs font-medium text-p-text-dim flex items-center justify-between z-10">
+              <span className="flex items-center gap-1.5">
+                <ListTree className="w-3.5 h-3.5" />
+                Outline
+              </span>
+              <button
+                onClick={() => setOutlineOpen(false)}
+                className="text-p-text-dim hover:text-p-text"
+                title="Hide outline"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            </div>
+            {outline.length === 0 ? (
+              <p className="px-3 py-3 text-xs text-p-text-dim italic">No headings found</p>
+            ) : (
+              <ul className="py-1">
+                {outline.map(h => (
+                  <li key={h.index}>
+                    <button
+                      onClick={() => scrollToHeading(h.index)}
+                      className="w-full text-left py-1 pr-3 text-xs text-p-text hover:bg-p-surface-hover truncate tab-transition"
+                      style={{ paddingLeft: 12 + (h.level - 1) * 12 }}
+                      title={h.text}
+                    >
+                      {h.text}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </aside>
+        )}
+
         {/* PDF pane */}
         {sideBySide && pdfBlobUrl && (
           <div className="w-1/2 border-r border-p-border">
@@ -471,7 +600,7 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
               )}
               <div ref={renderedAreaRef}>
                 {chunks.slice(0, loadedCount).map((chunk, i) => (
-                  <MarkdownChunk key={i} content={chunk} />
+                  <MarkdownChunk key={i} content={chunk} startHeadingIndex={chunkHeadingStarts[i] ?? 0} />
                 ))}
               </div>
               {loadedCount < chunks.length && (

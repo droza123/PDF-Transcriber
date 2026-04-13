@@ -1,4 +1,4 @@
-const { app, BrowserWindow, shell, session, ipcMain, powerSaveBlocker } = require('electron');
+const { app, BrowserWindow, shell, session, ipcMain, powerSaveBlocker, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { Worker } = require('worker_threads');
@@ -230,6 +230,27 @@ ipcMain.handle('persistence:read-markdown', async (_event, mdPath) => {
     return await fs.promises.readFile(mdPath, 'utf-8');
   } catch {
     return null;
+  }
+});
+
+// Open a native file picker for the user to choose a markdown file to view.
+// Returns the selected path + content, or null if the user cancels.
+ipcMain.handle('open-markdown-file', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Open markdown file',
+    properties: ['openFile'],
+    filters: [
+      { name: 'Markdown', extensions: ['md', 'markdown', 'mdown', 'mkdn', 'txt'] },
+      { name: 'All Files', extensions: ['*'] },
+    ],
+  });
+  if (result.canceled || result.filePaths.length === 0) return null;
+  const filePath = result.filePaths[0];
+  try {
+    const content = await fs.promises.readFile(filePath, 'utf-8');
+    return { filePath, content };
+  } catch (err) {
+    return { filePath, content: null, error: err.message };
   }
 });
 

@@ -26,6 +26,7 @@ declare global {
     saveLog: (entries: LogEntry[]) => Promise<void>;
     loadLog: () => Promise<LogEntry[]>;
     readMarkdown: (mdPath: string) => Promise<string | null>;
+    openMarkdownFile: () => Promise<{ filePath: string; content: string | null; error?: string } | null>;
     readPdf: (pdfPath: string) => Promise<ArrayBuffer>;
     fileExists: (filePath: string) => Promise<boolean>;
     convertMarkdownToDocx: (markdown: string, format?: string) => Promise<ArrayBuffer>;

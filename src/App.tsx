@@ -29,8 +29,9 @@ export default function App() {
   const [sidebarTab, setSidebarTab] = useState<'queue' | 'history' | 'log'>('queue');
   const [logEntries, setLogEntries] = useState<LogEntry[]>([]);
   const [previewJobId, setPreviewJobId] = useState<string | null>(null);
-  const [previewSource, setPreviewSource] = useState<'queue' | 'history'>('queue');
+  const [previewSource, setPreviewSource] = useState<'queue' | 'history' | 'opened'>('queue');
   const [historyMarkdown, setHistoryMarkdown] = useState<string | null>(null);
+  const [openedFile, setOpenedFile] = useState<{ filePath: string; fileName: string; content: string } | null>(null);
   const [historySearch, setHistorySearch] = useState('');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsInitialProvider, setSettingsInitialProvider] = useState<ProviderId | null>(null);
@@ -733,12 +734,14 @@ export default function App() {
     setPreviewSource('queue');
     setPreviewJobId(prev => (prev === id ? null : id));
     setHistoryMarkdown(null);
+    setOpenedFile(null);
   }, []);
 
   // ── History actions ───────────────────────────────────────────────────────
   const previewHistoryItem = useCallback(async (entry: HistoryEntry) => {
     setPreviewSource('history');
     setPreviewJobId(entry.id);
+    setOpenedFile(null);
     let content = entry.savedPath
       ? await window.electronAPI?.readMarkdown(entry.savedPath)
       : null;
@@ -879,12 +882,25 @@ export default function App() {
     exportHistoryAsCsv(history);
   }, [history]);
 
+  // Open an external markdown file for viewing / exporting (no API key needed)
+  const handleOpenMarkdown = useCallback(async () => {
+    if (!window.electronAPI?.openMarkdownFile) return;
+    const result = await window.electronAPI.openMarkdownFile();
+    if (!result || !result.content) return;
+    const fileName = result.filePath.split(/[\\/]/).pop() || 'document.md';
+    setOpenedFile({ filePath: result.filePath, fileName, content: result.content });
+    setPreviewSource('opened');
+    setPreviewJobId(null);
+    setHistoryMarkdown(null);
+  }, []);
+
   // ── Derived state ─────────────────────────────────────────────────────────
   const previewJob = jobs.find(j => j.id === previewJobId && (j.status === 'done' || (j.status === 'converting' && j.markdown)));
   const previewHistoryEntry = history.find(h => h.id === previewJobId);
 
   const showQueuePreview = previewSource === 'queue' && previewJob;
   const showHistoryPreview = previewSource === 'history' && previewHistoryEntry && historyMarkdown;
+  const showOpenedPreview = previewSource === 'opened' && openedFile;
 
   return (
     <div className="flex flex-col h-screen bg-p-bg noise-bg">
@@ -893,6 +909,7 @@ export default function App() {
         keyPresent={keyPresent}
         onToggleTheme={toggleTheme}
         onOpenSettings={() => setSettingsOpen(true)}
+        onOpenMarkdown={window.electronAPI?.openMarkdownFile ? handleOpenMarkdown : undefined}
       />
 
       <div className="flex-1 flex overflow-hidden">
@@ -991,8 +1008,15 @@ export default function App() {
         </div>
 
         {/* Right panel: preview */}
-        <div className={`hidden lg:flex flex-1 flex-col min-w-0 ${showQueuePreview || showHistoryPreview ? 'bg-p-bg-deep' : 'paper-bg'}`}>
-          {!keyPresent ? (
+        <div className={`hidden lg:flex flex-1 flex-col min-w-0 ${showQueuePreview || showHistoryPreview || showOpenedPreview ? 'bg-p-bg-deep' : 'paper-bg'}`}>
+          {showOpenedPreview ? (
+            <Preview
+              markdown={openedFile!.content}
+              fileName={openedFile!.fileName}
+              savedPath={openedFile!.filePath}
+              sourcePath={null}
+            />
+          ) : !keyPresent ? (
             <Welcome
               onOpenSettings={() => setSettingsOpen(true)}
               onSelectProvider={(provider) => {
@@ -1010,14 +1034,21 @@ export default function App() {
               sourcePath={previewHistoryEntry!.sourcePath}
             />
           ) : (
-            <div className="flex-1 flex items-center justify-center text-p-text-dim text-sm relative z-10">
-              <div className="text-center">
-                <p style={{ fontFamily: 'var(--font-display)' }}>
-                  {jobs.some(j => j.status === 'done') || history.length > 0
-                    ? 'Select an item to preview'
-                    : 'Converted markdown will appear here'}
-                </p>
-              </div>
+            <div className="flex-1 flex flex-col items-center justify-center text-p-text-dim text-sm relative z-10 gap-4">
+              <p style={{ fontFamily: 'var(--font-display)' }}>
+                {jobs.some(j => j.status === 'done') || history.length > 0
+                  ? 'Select an item to preview'
+                  : 'Converted markdown will appear here'}
+              </p>
+              {window.electronAPI?.openMarkdownFile && (
+                <button
+                  onClick={handleOpenMarkdown}
+                  className="btn-ghost text-xs"
+                  title="Open an existing markdown file to view or export"
+                >
+                  Open markdown file...
+                </button>
+              )}
             </div>
           )}
         </div>
