@@ -113,10 +113,21 @@ function downloadBlob(blob: Blob, filename: string): void {
   URL.revokeObjectURL(url);
 }
 
+/**
+ * Strip whatever extension is on `fileName` and append `newExt` (must include
+ * the leading dot). Used by the export helpers — historically they assumed
+ * the filename always ended in `.pdf`, but the Preview now also serves
+ * already-converted history items and externally opened `.md` files, so a
+ * simple `.replace(/\.pdf$/i, ext)` is a no-op for those and the wrong
+ * extension ends up on the saved file.
+ */
+function withExtension(fileName: string, newExt: string): string {
+  return fileName.replace(/\.[^./\\]+$/, '') + newExt;
+}
+
 /** Download a single markdown file. */
 export function downloadMarkdown(fileName: string, content: string): void {
-  const mdName = fileName.replace(/\.pdf$/i, '.md');
-  downloadBlob(new Blob([content], { type: 'text/markdown;charset=utf-8' }), mdName);
+  downloadBlob(new Blob([content], { type: 'text/markdown;charset=utf-8' }), withExtension(fileName, '.md'));
 }
 
 /** Export history entries as CSV. */
@@ -208,17 +219,17 @@ export function exportAsJson(fileName: string, markdownContent: string): void {
   const json = buildJsonExport(markdownContent);
   downloadBlob(
     new Blob([json], { type: 'application/json;charset=utf-8' }),
-    fileName.replace(/\.pdf$/i, '.json'),
+    withExtension(fileName, '.json'),
   );
 }
 
 /** Export markdown as a formatted HTML file. */
 export async function exportAsHtml(fileName: string, markdownContent: string): Promise<void> {
-  const title = fileName.replace(/\.pdf$/i, '');
+  const title = withExtension(fileName, '');
   const html = await renderMarkdownToHtml(markdownContent, title);
   downloadBlob(
     new Blob([html], { type: 'text/html;charset=utf-8' }),
-    fileName.replace(/\.pdf$/i, '.html'),
+    withExtension(fileName, '.html'),
   );
 }
 
@@ -236,7 +247,7 @@ export async function exportAsDocx(
     }
     onExporting?.(true);
     const buffer = await window.electronAPI.convertMarkdownToDocx(markdownContent, format || 'standard');
-    downloadBlob(new Blob([buffer]), fileName.replace(/\.pdf$/i, '.docx'));
+    downloadBlob(new Blob([buffer]), withExtension(fileName, format === 'logos' ? '.logos.docx' : '.docx'));
   } catch (e: any) {
     console.error('[docx export] Failed:', e);
     alert(`DOCX export failed: ${e.message || 'Unknown error'}`);
@@ -291,7 +302,7 @@ export async function runAutoExport(
           break;
         }
         case 'html': {
-          const title = fileName.replace(/\.pdf$/i, '');
+          const title = withExtension(fileName, '');
           const html = await renderMarkdownToHtml(markdown, title);
           await api.saveFile(outPath, html, 'html', unique);
           break;
