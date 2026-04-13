@@ -233,6 +233,14 @@ ipcMain.handle('persistence:read-markdown', async (_event, mdPath) => {
   }
 });
 
+// Overwrite a markdown file at an arbitrary user-known path. Used by the
+// post-hoc heading cleanup action to update the existing exported .md file
+// in place. Writes raw UTF-8 content with no path manipulation.
+ipcMain.handle('write-markdown', async (_event, filePath, content) => {
+  await fs.promises.writeFile(filePath, content, 'utf-8');
+  return filePath;
+});
+
 // Open a native file picker for the user to choose a markdown file to view.
 // Returns the selected path + content, or null if the user cancels.
 ipcMain.handle('open-markdown-file', async () => {

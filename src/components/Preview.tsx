@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback, useRef, useMemo, memo, startTransition } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Copy, Check, Download, FolderOpen, Hash, Table2, BookOpen, Footprints, Search, X, ChevronDown, ChevronUp, Columns2, FileText, Loader2, Radio, ListTree } from 'lucide-react';
+import { Copy, Check, Download, FolderOpen, Hash, Table2, BookOpen, Footprints, Search, X, ChevronDown, ChevronUp, Columns2, FileText, Loader2, Radio, ListTree, Sparkles, RotateCcw, Save } from 'lucide-react';
 import type { ConversionJob } from '../types';
 import { downloadMarkdown, showInFolder, exportAsHtml, exportAsJson, exportAsDocx } from '../lib/download';
+import { cleanHeadings } from '../lib/headingCleanup';
 
 interface PreviewProps {
   job?: ConversionJob;
@@ -12,6 +13,13 @@ interface PreviewProps {
   savedPath?: string | null;
   sourcePath?: string | null;
   onOpenMarkdown?: () => void;
+  /**
+   * Persist a cleaned-up version of the markdown back to its source. Called
+   * with the new content when the user accepts a heading-cleanup pass.
+   * Optional — when omitted, cleanup still works as a preview-only operation
+   * (Save button hidden).
+   */
+  onSaveCleaned?: (content: string) => Promise<void> | void;
 }
 
 const INITIAL_CHUNKS = 10;
@@ -51,7 +59,7 @@ const MarkdownChunk = memo(function MarkdownChunk({ content, startHeadingIndex }
   );
 });
 
-export default function Preview({ job, markdown: externalMd, fileName: externalName, savedPath: externalSavedPath, sourcePath: externalSourcePath, onOpenMarkdown }: PreviewProps) {
+export default function Preview({ job, markdown: externalMd, fileName: externalName, savedPath: externalSavedPath, sourcePath: externalSourcePath, onOpenMarkdown, onSaveCleaned }: PreviewProps) {
   const [tab, setTab] = useState<'raw' | 'rendered'>('rendered');
   const [copied, setCopied] = useState(false);
   const [sideBySide, setSideBySide] = useState(false);
@@ -67,10 +75,23 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
     localStorage.setItem('outline_open', outlineOpen ? '1' : '0');
   }, [outlineOpen]);
 
-  const md = job?.markdown ?? externalMd ?? '';
+  const baseMd = job?.markdown ?? externalMd ?? '';
   const fileName = job?.fileName ?? externalName ?? 'document.pdf';
   const resolvedSavedPath = job?.savedPath ?? externalSavedPath ?? null;
   const resolvedSourcePath = job?.sourcePath ?? externalSourcePath ?? null;
+
+  // Heading-cleanup override: when set, the displayed markdown is the cleaned
+  // version. Reset whenever the underlying baseMd changes (e.g. user navigates
+  // to a different document, or live-preview content updates).
+  const [cleanedOverride, setCleanedOverride] = useState<string | null>(null);
+  const [cleanStats, setCleanStats] = useState<{ headingsBefore: number; headingsAfter: number; linesRemoved: number } | null>(null);
+  const [savingCleaned, setSavingCleaned] = useState(false);
+  useEffect(() => {
+    setCleanedOverride(null);
+    setCleanStats(null);
+  }, [baseMd]);
+
+  const md = cleanedOverride ?? baseMd;
 
   // Extract YAML frontmatter for styled rendering
   const { frontmatter, body } = useMemo(() => {
@@ -194,6 +215,41 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
     navigator.clipboard.writeText(md);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  }
+
+  // Run the heading-cleanup pass on the current markdown and stage the result
+  // as an override. No persistence happens until the user clicks "Save".
+  const headingCount = (s: string) => (s.match(/^#{1,6}\s+\S/gm) || []).length;
+  function handleCleanHeadings() {
+    const cleaned = cleanHeadings(baseMd);
+    if (cleaned === baseMd) {
+      // Nothing changed — surface that visibly.
+      setCleanedOverride(baseMd);
+      setCleanStats({ headingsBefore: headingCount(baseMd), headingsAfter: headingCount(baseMd), linesRemoved: 0 });
+      return;
+    }
+    setCleanedOverride(cleaned);
+    setCleanStats({
+      headingsBefore: headingCount(baseMd),
+      headingsAfter: headingCount(cleaned),
+      linesRemoved: baseMd.split('\n').length - cleaned.split('\n').length,
+    });
+  }
+
+  async function handleSaveCleaned() {
+    if (!cleanedOverride || !onSaveCleaned) return;
+    try {
+      setSavingCleaned(true);
+      await onSaveCleaned(cleanedOverride);
+      // Parent will refresh `markdown` prop; the [baseMd] effect clears the override.
+    } finally {
+      setSavingCleaned(false);
+    }
+  }
+
+  function handleRevertCleaned() {
+    setCleanedOverride(null);
+    setCleanStats(null);
   }
 
   // Scroll to a heading by its document-order index. Forces rendered tab and
@@ -403,6 +459,15 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
             </button>
           )}
           <button
+            onClick={handleCleanHeadings}
+            className="btn-ghost"
+            title="Clean up heading artifacts (duplicates, TOC entries, '## ## Title' artifacts)"
+            disabled={!baseMd || job?.status === 'converting'}
+          >
+            <Sparkles className="w-3 h-3" />
+            Clean headings
+          </button>
+          <button
             onClick={() => { setFindOpen(true); setTimeout(() => findInputRef.current?.focus(), 50); }}
             className="btn-ghost"
             title="Find (Ctrl+F)"
@@ -534,6 +599,42 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
         </span>
         <span className="ml-auto">{(md.length / 1024).toFixed(1)} KB</span>
       </div>
+
+      {/* Heading cleanup banner */}
+      {cleanStats && (
+        <div className="flex items-center gap-3 px-4 py-2 border-b border-p-accent/20 bg-p-accent/5 shrink-0">
+          <Sparkles className="w-3.5 h-3.5 text-p-accent shrink-0" />
+          <span className="text-xs text-p-text">
+            {cleanStats.headingsBefore === cleanStats.headingsAfter && cleanStats.linesRemoved === 0
+              ? <span className="text-p-text-dim">No heading issues found — markdown is already clean.</span>
+              : <>
+                  Cleaned <strong>{cleanStats.headingsBefore - cleanStats.headingsAfter}</strong> heading{cleanStats.headingsBefore - cleanStats.headingsAfter === 1 ? '' : 's'}
+                  {cleanStats.linesRemoved > 0 && <> &middot; removed <strong>{cleanStats.linesRemoved}</strong> line{cleanStats.linesRemoved === 1 ? '' : 's'}</>}
+                </>}
+          </span>
+          <div className="ml-auto flex items-center gap-1.5">
+            {onSaveCleaned && cleanedOverride !== baseMd && (
+              <button
+                onClick={handleSaveCleaned}
+                className="btn-ghost"
+                disabled={savingCleaned}
+                title="Overwrite the saved markdown file with the cleaned version"
+              >
+                {savingCleaned ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
+                {savingCleaned ? 'Saving...' : 'Save changes'}
+              </button>
+            )}
+            <button
+              onClick={handleRevertCleaned}
+              className="btn-ghost"
+              title={cleanedOverride === baseMd ? 'Dismiss' : 'Discard cleaned version'}
+            >
+              <RotateCcw className="w-3 h-3" />
+              {cleanedOverride === baseMd ? 'Dismiss' : 'Revert'}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Live preview banner */}
       {job?.status === 'converting' && md && (

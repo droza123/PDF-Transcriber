@@ -882,6 +882,27 @@ export default function App() {
     exportHistoryAsCsv(history);
   }, [history]);
 
+  // Persist a cleaned-up version of an opened markdown file back to disk and
+  // refresh the visible preview content.
+  const handleSaveCleanedOpened = useCallback(async (content: string) => {
+    if (!openedFile || !window.electronAPI?.writeMarkdown) return;
+    await window.electronAPI.writeMarkdown(openedFile.filePath, content);
+    setOpenedFile({ ...openedFile, content });
+  }, [openedFile]);
+
+  // Persist a cleaned-up version of a history entry's markdown. Updates the
+  // exported .md file (if any) AND the internal copy used for preview.
+  const handleSaveCleanedHistory = useCallback(async (content: string) => {
+    if (!previewJobId) return;
+    const entry = historyRef.current.find(h => h.id === previewJobId);
+    if (!entry) return;
+    if (entry.savedPath && window.electronAPI?.writeMarkdown) {
+      try { await window.electronAPI.writeMarkdown(entry.savedPath, content); } catch { /* keep going */ }
+    }
+    await window.electronAPI?.saveInternalMarkdown(entry.id, content);
+    setHistoryMarkdown(content);
+  }, [previewJobId]);
+
   // Open an external markdown file for viewing / exporting (no API key needed)
   const handleOpenMarkdown = useCallback(async () => {
     if (!window.electronAPI?.openMarkdownFile) return;
@@ -909,7 +930,6 @@ export default function App() {
         keyPresent={keyPresent}
         onToggleTheme={toggleTheme}
         onOpenSettings={() => setSettingsOpen(true)}
-        onOpenMarkdown={window.electronAPI?.openMarkdownFile ? handleOpenMarkdown : undefined}
       />
 
       <div className="flex-1 flex overflow-hidden">
@@ -1016,6 +1036,7 @@ export default function App() {
               savedPath={openedFile!.filePath}
               sourcePath={null}
               onOpenMarkdown={window.electronAPI?.openMarkdownFile ? handleOpenMarkdown : undefined}
+              onSaveCleaned={window.electronAPI?.writeMarkdown ? handleSaveCleanedOpened : undefined}
             />
           ) : !keyPresent ? (
             <Welcome
@@ -1037,6 +1058,7 @@ export default function App() {
               savedPath={previewHistoryEntry!.savedPath}
               sourcePath={previewHistoryEntry!.sourcePath}
               onOpenMarkdown={window.electronAPI?.openMarkdownFile ? handleOpenMarkdown : undefined}
+              onSaveCleaned={handleSaveCleanedHistory}
             />
           ) : (
             <div className="flex-1 flex flex-col items-center justify-center text-p-text-dim text-sm relative z-10 gap-4">
