@@ -8,7 +8,7 @@ import {
   batchDelay,
   extractTrailingHeadings,
 } from './gemini';
-import { cleanHeadings } from './headingCleanup';
+import { cleanHeadings, flattenOutlineHeadings } from './headingCleanup';
 
 type ProgressCallback = (update: Partial<ConversionJob>) => void;
 
@@ -236,5 +236,12 @@ export async function convertFile(options: ConvertFileOptions): Promise<string> 
   // Include outline as a navigable TOC after frontmatter
   const toc = `\n\n<!-- Document Outline -->\n\n${stripCodeFences(outline)}\n\n---\n`;
 
-  return `${frontmatter}${toc}\n${body}`;
+  let assembled = `${frontmatter}${toc}\n${body}`;
+  // Flatten heading-shaped TOC entries inside the outline block to bullets,
+  // so the navigable outline doesn't pollute heading counts / outline sidebar.
+  // Done last so the body-only cleanup above isn't confused by outline headings.
+  if (getSettings().headingCleanupEnabled) {
+    assembled = flattenOutlineHeadings(assembled);
+  }
+  return assembled;
 }
