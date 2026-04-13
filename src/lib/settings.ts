@@ -54,6 +54,12 @@ export interface AppSettings {
   exportTranscriptionWithTranslation: boolean;
   customBaseUrl: string;
   customModels: string[];
+  /**
+   * Last folder a user picked through a Save As / Open dialog. Hidden — no UI
+   * surface — used to seed the next dialog's defaultPath when the currently
+   * previewed file doesn't supply one.
+   */
+  lastBrowsedDir: string;
 }
 
 const STORAGE_KEY = 'app_settings';
@@ -80,6 +86,7 @@ const DEFAULTS: AppSettings = {
   exportTranscriptionWithTranslation: true,
   customBaseUrl: 'http://localhost:11434/v1',
   customModels: [],
+  lastBrowsedDir: '',
 };
 
 export function getSettings(): AppSettings {

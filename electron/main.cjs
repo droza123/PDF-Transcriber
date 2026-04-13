@@ -243,9 +243,12 @@ ipcMain.handle('write-markdown', async (_event, filePath, content) => {
 
 // Open a native file picker for the user to choose a markdown file to view.
 // Returns the selected path + content, or null if the user cancels.
-ipcMain.handle('open-markdown-file', async () => {
+// `defaultPath` (optional) seeds the dialog's starting directory — pass the
+// folder of the currently previewed file when there is one.
+ipcMain.handle('open-markdown-file', async (_event, defaultPath) => {
   const result = await dialog.showOpenDialog(mainWindow, {
     title: 'Open markdown file',
+    defaultPath: defaultPath || undefined,
     properties: ['openFile'],
     filters: [
       { name: 'Markdown', extensions: ['md', 'markdown', 'mdown', 'mkdn', 'txt'] },
@@ -260,6 +263,22 @@ ipcMain.handle('open-markdown-file', async () => {
   } catch (err) {
     return { filePath, content: null, error: err.message };
   }
+});
+
+// Open a native Save As dialog seeded with `defaultPath` (a full file path)
+// and write the supplied content. Returns the chosen path or null on cancel.
+// `isBinary: true` writes raw bytes from an ArrayBuffer; otherwise UTF-8.
+ipcMain.handle('save-file-as', async (_event, opts) => {
+  const { defaultPath, content, filters, isBinary } = opts || {};
+  const result = await dialog.showSaveDialog(mainWindow, {
+    title: 'Save as',
+    defaultPath: defaultPath || undefined,
+    filters: filters && filters.length > 0 ? filters : [{ name: 'All Files', extensions: ['*'] }],
+  });
+  if (result.canceled || !result.filePath) return null;
+  const data = isBinary ? Buffer.from(content) : content;
+  await fs.promises.writeFile(result.filePath, data, isBinary ? undefined : 'utf-8');
+  return result.filePath;
 });
 
 ipcMain.handle('persistence:read-pdf', async (_event, pdfPath) => {

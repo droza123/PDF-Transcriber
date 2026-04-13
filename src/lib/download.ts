@@ -1,5 +1,5 @@
 import type { ConversionJob, HistoryEntry } from '../types';
-import { getSettings } from './settings';
+import { getSettings, saveSettings } from './settings';
 
 // ── Shared HTML rendering (lazy-loaded to avoid crashing on import) ──────────
 
@@ -125,9 +125,64 @@ function withExtension(fileName: string, newExt: string): string {
   return fileName.replace(/\.[^./\\]+$/, '') + newExt;
 }
 
-/** Download a single markdown file. */
-export function downloadMarkdown(fileName: string, content: string): void {
-  downloadBlob(new Blob([content], { type: 'text/markdown;charset=utf-8' }), withExtension(fileName, '.md'));
+/** Cross-platform `path.dirname` for renderer use. */
+function dirOf(filePath: string | null | undefined): string {
+  if (!filePath) return '';
+  const idx = Math.max(filePath.lastIndexOf('/'), filePath.lastIndexOf('\\'));
+  return idx > 0 ? filePath.slice(0, idx) : '';
+}
+
+/** Resolve the starting directory for a Save As / Open dialog. Prefer the
+ *  caller-supplied directory (the previewed file's folder); fall back to the
+ *  last folder the user browsed to via a dialog. */
+function resolveDefaultDir(preferred?: string | null): string | undefined {
+  if (preferred) return preferred;
+  const last = getSettings().lastBrowsedDir;
+  return last || undefined;
+}
+
+/** Update the persisted "last browsed folder" from a freshly-saved file path. */
+export function rememberBrowsedDir(filePath: string | null | undefined): void {
+  const dir = dirOf(filePath);
+  if (dir) saveSettings({ lastBrowsedDir: dir });
+}
+
+/** Save (Electron) or download (browser fallback) a file. In Electron it pops
+ *  a native Save As dialog seeded with `<defaultDir>/<fileName>`. */
+async function saveOrDownload(
+  data: string | ArrayBuffer,
+  fileName: string,
+  mimeType: string,
+  filters: { name: string; extensions: string[] }[],
+  defaultDir?: string | null,
+  isBinary = false,
+): Promise<void> {
+  if (window.electronAPI?.saveFileAs) {
+    const dir = resolveDefaultDir(defaultDir);
+    const defaultPath = dir ? `${dir.replace(/[\\/]+$/, '')}/${fileName}` : fileName;
+    const saved = await window.electronAPI.saveFileAs({
+      defaultPath,
+      content: data,
+      filters,
+      isBinary,
+    });
+    if (saved) rememberBrowsedDir(saved);
+    return;
+  }
+  // Browser fallback — no real file picker, drops into the Downloads folder.
+  const blob = isBinary ? new Blob([data]) : new Blob([data], { type: mimeType });
+  downloadBlob(blob, fileName);
+}
+
+/** Download / Save a single markdown file. */
+export async function downloadMarkdown(fileName: string, content: string, defaultDir?: string | null): Promise<void> {
+  await saveOrDownload(
+    content,
+    withExtension(fileName, '.md'),
+    'text/markdown;charset=utf-8',
+    [{ name: 'Markdown', extensions: ['md'] }, { name: 'All Files', extensions: ['*'] }],
+    defaultDir,
+  );
 }
 
 /** Export history entries as CSV. */
@@ -215,21 +270,27 @@ export function buildJsonExport(markdownContent: string): string {
 }
 
 /** Export markdown as a JSON file. */
-export function exportAsJson(fileName: string, markdownContent: string): void {
+export async function exportAsJson(fileName: string, markdownContent: string, defaultDir?: string | null): Promise<void> {
   const json = buildJsonExport(markdownContent);
-  downloadBlob(
-    new Blob([json], { type: 'application/json;charset=utf-8' }),
+  await saveOrDownload(
+    json,
     withExtension(fileName, '.json'),
+    'application/json;charset=utf-8',
+    [{ name: 'JSON', extensions: ['json'] }, { name: 'All Files', extensions: ['*'] }],
+    defaultDir,
   );
 }
 
 /** Export markdown as a formatted HTML file. */
-export async function exportAsHtml(fileName: string, markdownContent: string): Promise<void> {
+export async function exportAsHtml(fileName: string, markdownContent: string, defaultDir?: string | null): Promise<void> {
   const title = withExtension(fileName, '');
   const html = await renderMarkdownToHtml(markdownContent, title);
-  downloadBlob(
-    new Blob([html], { type: 'text/html;charset=utf-8' }),
+  await saveOrDownload(
+    html,
     withExtension(fileName, '.html'),
+    'text/html;charset=utf-8',
+    [{ name: 'HTML', extensions: ['html', 'htm'] }, { name: 'All Files', extensions: ['*'] }],
+    defaultDir,
   );
 }
 
@@ -239,6 +300,7 @@ export async function exportAsDocx(
   markdownContent: string,
   onExporting?: (exporting: boolean) => void,
   format?: 'standard' | 'logos',
+  defaultDir?: string | null,
 ): Promise<void> {
   try {
     if (!window.electronAPI?.convertMarkdownToDocx) {
@@ -247,7 +309,15 @@ export async function exportAsDocx(
     }
     onExporting?.(true);
     const buffer = await window.electronAPI.convertMarkdownToDocx(markdownContent, format || 'standard');
-    downloadBlob(new Blob([buffer]), withExtension(fileName, format === 'logos' ? '.logos.docx' : '.docx'));
+    const ext = format === 'logos' ? '.logos.docx' : '.docx';
+    await saveOrDownload(
+      buffer,
+      withExtension(fileName, ext),
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      [{ name: 'Word document', extensions: ['docx'] }, { name: 'All Files', extensions: ['*'] }],
+      defaultDir,
+      true,
+    );
   } catch (e: any) {
     console.error('[docx export] Failed:', e);
     alert(`DOCX export failed: ${e.message || 'Unknown error'}`);

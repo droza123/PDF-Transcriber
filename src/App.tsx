@@ -5,7 +5,7 @@ import { createJob } from './types';
 import { hasApiKey, getApiKey } from './lib/apiKey';
 import { convertFile } from './lib/convert';
 import { translateMarkdown } from './lib/gemini';
-import { canSaveToSource, runAutoExport, exportHistoryAsCsv } from './lib/download';
+import { canSaveToSource, runAutoExport, exportHistoryAsCsv, rememberBrowsedDir } from './lib/download';
 import { getSettings, saveSettings, addSessionSkippedModel } from './lib/settings';
 import { getProvider } from './lib/providers/registry';
 import type { ProviderId } from './lib/providers/types';
@@ -903,16 +903,20 @@ export default function App() {
     setHistoryMarkdown(content);
   }, [previewJobId]);
 
-  // Open an external markdown file for viewing / exporting (no API key needed)
-  const handleOpenMarkdown = useCallback(async () => {
+  // Open an external markdown file for viewing / exporting (no API key needed).
+  // `defaultDir` (optional) seeds the picker — preview passes the previewed
+  // file's folder; we fall back to the persisted last-browsed folder.
+  const handleOpenMarkdown = useCallback(async (defaultDir?: string | null) => {
     if (!window.electronAPI?.openMarkdownFile) return;
-    const result = await window.electronAPI.openMarkdownFile();
+    const seedDir = defaultDir || getSettings().lastBrowsedDir || undefined;
+    const result = await window.electronAPI.openMarkdownFile(seedDir);
     if (!result || !result.content) return;
     const fileName = result.filePath.split(/[\\/]/).pop() || 'document.md';
     setOpenedFile({ filePath: result.filePath, fileName, content: result.content });
     setPreviewSource('opened');
     setPreviewJobId(null);
     setHistoryMarkdown(null);
+    rememberBrowsedDir(result.filePath);
   }, []);
 
   // ── Derived state ─────────────────────────────────────────────────────────
@@ -1069,7 +1073,7 @@ export default function App() {
               </p>
               {window.electronAPI?.openMarkdownFile && (
                 <button
-                  onClick={handleOpenMarkdown}
+                  onClick={() => handleOpenMarkdown()}
                   className="btn-ghost text-xs"
                   title="Open an existing markdown file to view or export"
                 >

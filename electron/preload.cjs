@@ -25,7 +25,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   loadLog: () => ipcRenderer.invoke('persistence:load-log'),
   readMarkdown: (mdPath) => ipcRenderer.invoke('persistence:read-markdown', mdPath),
   writeMarkdown: (filePath, content) => ipcRenderer.invoke('write-markdown', filePath, content),
-  openMarkdownFile: () => ipcRenderer.invoke('open-markdown-file'),
+  openMarkdownFile: (defaultPath) => ipcRenderer.invoke('open-markdown-file', defaultPath),
+  saveFileAs: (opts) => ipcRenderer.invoke('save-file-as', opts),
   readPdf: (pdfPath) => ipcRenderer.invoke('persistence:read-pdf', pdfPath),
   fileExists: (filePath) => ipcRenderer.invoke('persistence:file-exists', filePath),
 

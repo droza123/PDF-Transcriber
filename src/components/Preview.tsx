@@ -12,7 +12,7 @@ interface PreviewProps {
   fileName?: string;
   savedPath?: string | null;
   sourcePath?: string | null;
-  onOpenMarkdown?: () => void;
+  onOpenMarkdown?: (defaultDir?: string | null) => void;
   /**
    * Persist a cleaned-up version of the markdown back to its source. Called
    * with the new content when the user accepts a heading-cleanup pass.
@@ -79,6 +79,16 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
   const fileName = job?.fileName ?? externalName ?? 'document.pdf';
   const resolvedSavedPath = job?.savedPath ?? externalSavedPath ?? null;
   const resolvedSourcePath = job?.sourcePath ?? externalSourcePath ?? null;
+
+  // Default directory for the Save As dialog: prefer the folder of the saved
+  // markdown (the export sits next to it), fall back to the source PDF's
+  // folder, then finally null (download.ts will use the last-browsed folder).
+  const exportDefaultDir = ((): string | null => {
+    const candidate = resolvedSavedPath || resolvedSourcePath;
+    if (!candidate) return null;
+    const idx = Math.max(candidate.lastIndexOf('/'), candidate.lastIndexOf('\\'));
+    return idx > 0 ? candidate.slice(0, idx) : null;
+  })();
 
   // Heading-cleanup override: when set, the displayed markdown is the cleaned
   // version. Reset whenever the underlying baseMd changes (e.g. user navigates
@@ -450,7 +460,7 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
         <div className="flex items-center gap-1.5">
           {onOpenMarkdown && (
             <button
-              onClick={onOpenMarkdown}
+              onClick={() => onOpenMarkdown(exportDefaultDir)}
               className="btn-ghost"
               title="Open another markdown file..."
             >
@@ -505,31 +515,31 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
                 <div className="fixed inset-0 z-10" onClick={() => setExportOpen(false)} />
                 <div className="absolute right-0 top-full mt-1 z-20 bg-p-surface border border-p-border rounded-xl shadow-xl py-1.5 min-w-[160px]">
                   <button
-                    onClick={() => { downloadMarkdown(fileName, md); setExportOpen(false); }}
+                    onClick={() => { downloadMarkdown(fileName, md, exportDefaultDir); setExportOpen(false); }}
                     className="w-full text-left px-3 py-2 text-xs text-p-text hover:bg-p-surface-hover tab-transition"
                   >
                     Download .md
                   </button>
                   <button
-                    onClick={() => { exportAsHtml(fileName, md); setExportOpen(false); }}
+                    onClick={() => { exportAsHtml(fileName, md, exportDefaultDir); setExportOpen(false); }}
                     className="w-full text-left px-3 py-2 text-xs text-p-text hover:bg-p-surface-hover tab-transition"
                   >
                     Export .html
                   </button>
                   <button
-                    onClick={() => { exportAsJson(fileName, md); setExportOpen(false); }}
+                    onClick={() => { exportAsJson(fileName, md, exportDefaultDir); setExportOpen(false); }}
                     className="w-full text-left px-3 py-2 text-xs text-p-text hover:bg-p-surface-hover tab-transition"
                   >
                     Export .json
                   </button>
                   <button
-                    onClick={() => { exportAsDocx(fileName, md, setExporting); setExportOpen(false); }}
+                    onClick={() => { exportAsDocx(fileName, md, setExporting, undefined, exportDefaultDir); setExportOpen(false); }}
                     className="w-full text-left px-3 py-2 text-xs text-p-text hover:bg-p-surface-hover tab-transition"
                   >
                     Export .docx
                   </button>
                   <button
-                    onClick={() => { exportAsDocx(fileName, md, setExporting, 'logos'); setExportOpen(false); }}
+                    onClick={() => { exportAsDocx(fileName, md, setExporting, 'logos', exportDefaultDir); setExportOpen(false); }}
                     className="w-full text-left px-3 py-2 text-xs text-p-text hover:bg-p-surface-hover tab-transition"
                   >
                     Export .docx (Logos/Verbum)
