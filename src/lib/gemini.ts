@@ -22,25 +22,47 @@ export function getBatchSize(): number {
 const PRESCAN_PROMPT = `Analyze this PDF document and produce a structural outline in Markdown. Include:
 
 1. The document's page numbering scheme (e.g., "roman numerals i-xii for front matter, then arabic 1-234 for body", or "no page numbers visible").
-2. A hierarchical table of contents using Markdown headings to show the nesting:
-   # Part/major division
-   ## Chapter/section
-   ### Subsection
-   #### Sub-subsection
+2. A hierarchical table of contents using Markdown headings to show the FULL nesting depth. Use up to six levels (# through ######) as needed to capture the document's actual structure:
+   # Part / major division                (e.g., "Part One", "§1")
+   ## Chapter / section                   (e.g., "Chapter 3", "A.", "Commentary on Matthew 1")
+   ### Subsection                         (e.g., "1.", "I.", "Introduction", "Text")
+   #### Sub-subsection                    (e.g., "1.1", "a.", "Historical Context")
+   ##### Sub-sub-subsection               (e.g., "1.1.1", "i.")
+   ###### Deepest level                   (rarely needed; use only for genuine 6th-level nesting)
    Include the page number (as printed in the document) next to each heading if visible.
+
+Source of truth:
+- If the document has a printed Table of Contents, prefer it as the hierarchy source — its indentation and numbering tell you the correct nesting depth.
+- Verify the TOC against headings visible in the body; if they disagree, trust the body's actual typography (larger/bolder = higher level).
+- For scholarly commentaries (Bible, classical texts, law), expect deep nesting: a chapter may contain several numbered sections, each with lettered subsections, each with numbered sub-points. Capture this faithfully — do not flatten.
 
 Output ONLY the outline — no content, no commentary.`;
 
-function buildBatchPrompt(batchNum: number, totalBatches: number, outline: string): string {
+function buildBatchPrompt(
+  batchNum: number,
+  totalBatches: number,
+  outline: string,
+  previousBatchHeadings: string = '',
+): string {
   const settings = getSettings();
   const extra = settings.outputNotes ? `\n\nCustom instructions:\n${settings.outputNotes}` : '';
+
+  const prevBlock = previousBatchHeadings.trim()
+    ? `
+
+Previous batch context (headings already emitted in the previous batch, most recent last):
+
+${previousBatchHeadings}
+
+DO NOT repeat these headings. If the current batch begins mid-section (i.e., the first pages continue content under one of the headings above), do NOT re-emit that section's title — continue the content directly. Only emit a heading when you cross into a NEW section not listed above.`
+    : '';
 
   return `Convert this PDF to Markdown optimized for AI-assisted academic citation.
 This is batch ${batchNum} of ${totalBatches} from the source document.
 
 Here is the document's structural outline for context (use this to determine correct heading levels and understand where this batch falls in the document):
 
-${outline}
+${outline}${prevBlock}
 
 Page numbering:
 - Look for printed page numbers on each page of this PDF.
@@ -49,6 +71,11 @@ Page numbering:
 
 Layout awareness:
 - Some PDFs contain scanned two-page spreads (two document pages side by side on a single PDF page). When you detect this, read LEFT page first, then RIGHT page. Do not interleave or duplicate content across the two pages. Each document page should appear exactly once in the output.
+
+Running headers / page headers:
+- PDFs typically have a running header at the top (and/or bottom) of each page — a shortened book title, chapter name, author surname, or section title repeated on every page. These are visual navigation aids, NOT structural headings.
+- Do NOT emit running headers as Markdown headings. You can recognize them by repetition: if the same short line appears at the top of many consecutive pages, it is a running header — omit it entirely.
+- Only emit a heading when it is a genuine, one-time section title in the flow of the text (typically typeset larger, bolder, or on its own line with spacing around it).
 
 Content rules:
 1. Use the heading hierarchy from the outline above to determine correct heading levels (# ## ### etc.). Match headings to the outline — do not guess levels independently.
@@ -63,6 +90,21 @@ Content rules:
 10. Preserve numbered and bulleted lists exactly.
 11. Do not add commentary — output only document content as Markdown.
 12. Never duplicate content — each passage of text should appear exactly once.${extra}`;
+}
+
+/**
+ * Extract the last N markdown headings from a batch's output, to feed forward as
+ * context for the next batch's prompt (A1 — previous-batch heading awareness).
+ * Returns the headings as-is, each on its own line, or '' if none found.
+ */
+export function extractTrailingHeadings(markdown: string, count = 5): string {
+  const matches: string[] = [];
+  for (const line of markdown.split('\n')) {
+    if (/^(#{1,6})\s+\S/.test(line)) {
+      matches.push(line.trim());
+    }
+  }
+  return matches.slice(-count).join('\n');
 }
 
 // ── Public exports consumed by convert.ts ───────────────────────────────────
@@ -89,6 +131,7 @@ export async function convertPdfBatchToMarkdown(
   batchNum: number,
   totalBatches: number,
   outline: string,
+  previousBatchHeadings: string = '',
   onRetry?: (attempt: number, delaySec: number, reason?: string) => void,
   abortSignal?: AbortSignal,
   skipModels?: Set<string>,
@@ -97,7 +140,7 @@ export async function convertPdfBatchToMarkdown(
   onStreamProgress?: (phase: 'uploading' | 'processing' | 'streaming', charsReceived: number) => void,
   onError?: (model: string, reason: string, action: string) => void,
 ): Promise<ProviderResult> {
-  const prompt = buildBatchPrompt(batchNum, totalBatches, outline);
+  const prompt = buildBatchPrompt(batchNum, totalBatches, outline, previousBatchHeadings);
   return callWithRetry(pdfBlob, prompt, {
     onRetry, abortSignal, skipModels, onModelSkip, onModelStart, onStreamProgress, onError,
   });

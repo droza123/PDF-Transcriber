@@ -6,7 +6,9 @@ import {
   extractDocumentOutline,
   convertPdfBatchToMarkdown,
   batchDelay,
+  extractTrailingHeadings,
 } from './gemini';
+import { cleanHeadings } from './headingCleanup';
 
 type ProgressCallback = (update: Partial<ConversionJob>) => void;
 
@@ -15,7 +17,14 @@ export interface ConvertFileOptions {
   jobId: string;
   sourcePath: string;
   onProgress: ProgressCallback;
-  onBatchComplete: (progress: PartialProgress) => void;
+  /**
+   * Called after each successful batch. May return a Promise — convert.ts
+   * awaits this so the persistence write lands before the next batch starts.
+   * This is what makes the retry-after-failure path actually resume: if a
+   * failure happens in the very next batch, the prior batch's progress is
+   * guaranteed to be on disk.
+   */
+  onBatchComplete: (progress: PartialProgress) => void | Promise<void>;
   resumeFrom?: PartialProgress;
   abortSignal?: AbortSignal;
 }
@@ -134,6 +143,13 @@ export async function convertFile(options: ConvertFileOptions): Promise<string> 
   const startBatch = resumeFrom?.completedBatches ?? 0;
   const fullPdfBlob = new Blob([arrayBuffer], { type: 'application/pdf' });
 
+  // A1 — feed the trailing headings from the prior batch into the next batch's
+  // prompt so section titles at chunk boundaries aren't re-emitted. Seed from
+  // the last completed batch on resume so the first resumed prompt also benefits.
+  let previousBatchHeadings = results.length > 0
+    ? extractTrailingHeadings(results[results.length - 1], 5)
+    : '';
+
   for (let start = startBatch * BATCH_SIZE; start < totalPages; start += BATCH_SIZE) {
     if (abortSignal?.aborted) throw new DOMException('Cancelled', 'AbortError');
 
@@ -158,6 +174,7 @@ export async function convertFile(options: ConvertFileOptions): Promise<string> 
       batchNum,
       totalBatches,
       outline,
+      previousBatchHeadings,
       (attempt, delay, reason) => {
         const msg = reason === 'rate_limited'
           ? `Batch ${batchNum}/${totalBatches}: rate limited \u2014 retrying in ${delay}s...`
@@ -172,10 +189,14 @@ export async function convertFile(options: ConvertFileOptions): Promise<string> 
       onError,
     );
     onProgress({ streamPhase: undefined, streamChars: 0 });
-    results.push(stripCodeFences(result.text));
+    const cleanedBatch = stripCodeFences(result.text);
+    results.push(cleanedBatch);
+    previousBatchHeadings = extractTrailingHeadings(cleanedBatch, 5);
 
-    // Persist partial progress after each batch
-    onBatchComplete({
+    // Persist partial progress after each batch. Awaited so the file flush
+    // lands before we begin the next batch — this is what guarantees the
+    // Retry button can resume even when a later batch crashes the app.
+    await onBatchComplete({
       jobId,
       fileName: file.name,
       sourcePath,
@@ -203,7 +224,13 @@ export async function convertFile(options: ConvertFileOptions): Promise<string> 
   }
 
   // Assemble final output
-  const body = normalizeBlankLines(results.join('\n\n'));
+  let body = normalizeBlankLines(results.join('\n\n'));
+  // Heading-quality post-processing (duplicates, TOC artifacts, markdown glitches).
+  // Applied to body only — the outline TOC block below is prescan output and
+  // must not be deduped against body headings.
+  if (getSettings().headingCleanupEnabled) {
+    body = cleanHeadings(body);
+  }
   const frontmatter = buildFrontmatter(file.name, totalPages);
 
   // Include outline as a navigable TOC after frontmatter

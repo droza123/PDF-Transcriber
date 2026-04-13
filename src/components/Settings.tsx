@@ -133,6 +133,7 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
   const [autoExportFormats, setAutoExportFormats] = useState<ExportFormat[]>(['md']);
   const [fileNaming, setFileNaming] = useState<FileNaming>('overwrite');
   const [preventSleep, setPreventSleep] = useState(false);
+  const [headingCleanupEnabled, setHeadingCleanupEnabled] = useState(true);
   const [translationEnabled, setTranslationEnabled] = useState(false);
   const [translationLanguage, setTranslationLanguage] = useState('');
   const [translationLanguages, setTranslationLanguages] = useState<string[]>([]);
@@ -170,6 +171,7 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
       setAutoExportFormats(s.autoExportFormats);
       setFileNaming(s.fileNaming);
       setPreventSleep(s.preventSleep);
+      setHeadingCleanupEnabled(s.headingCleanupEnabled);
       setTranslationEnabled(s.translationEnabled);
       setTranslationLanguage(s.translationLanguage);
       setTranslationLanguages(s.translationLanguages);
@@ -918,6 +920,22 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
             </label>
             <p className="text-xs text-p-text-dim mt-1 px-2">
               Keeps your computer awake while transcriptions are running. Useful for long jobs when you'll be away. The display will also stay on.
+            </p>
+          </div>
+
+          {/* Heading cleanup */}
+          <div className="section-divider">
+            <label className="flex items-center gap-2 px-2 py-1 rounded-lg hover:bg-p-surface-hover cursor-pointer">
+              <input
+                type="checkbox"
+                checked={headingCleanupEnabled}
+                onChange={(e) => { setHeadingCleanupEnabled(e.target.checked); saveSettings({ headingCleanupEnabled: e.target.checked }); }}
+                className="shrink-0 accent-p-accent"
+              />
+              <span className="text-sm text-p-text">Heading cleanup</span>
+            </label>
+            <p className="text-xs text-p-text-dim mt-1 px-2">
+              Removes duplicate headings at batch boundaries, Table-of-Contents entries mistakenly emitted as headings, and Markdown artifacts like <code>## ## Title</code>. Recommended for scholarly books.
             </p>
           </div>
 

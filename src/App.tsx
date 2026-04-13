@@ -640,13 +640,16 @@ export default function App() {
 
   const retryJob = useCallback(
     async (id: string) => {
-      // Check if there's saved progress to resume from
+      // Retry should ALWAYS try to continue from saved progress if any exists —
+      // never silently delete progress or restart from scratch. If the user
+      // truly wants to start over, they can remove the job (X button) and
+      // re-add it. This applies equally to failures and manual cancels.
       const progress = await window.electronAPI?.loadProgress(id);
       setJobs(prev =>
         prev.map(j => {
           if (j.id !== id) return j;
           if (progress && progress.completedBatches > 0) {
-            // Resume from saved progress
+            // Saved progress exists — resume from the last completed batch.
             return {
               ...j,
               status: 'queued' as const,
@@ -662,7 +665,12 @@ export default function App() {
               markdown: progress.results.length ? progress.results.join('\n\n') : j.markdown,
             };
           }
-          // No progress — full restart
+          // No saved progress (failure before any batch completed, or progress
+          // never persisted) — queue fresh. We deliberately do NOT call
+          // deleteProgress here: if a file does exist it will be overwritten
+          // by the first onBatchComplete of the new run, and if it doesn't
+          // there's nothing to delete. Avoiding the delete prevents a race
+          // where a momentarily-unreadable progress file gets nuked.
           return {
             ...j,
             status: 'queued' as const,
@@ -678,9 +686,6 @@ export default function App() {
           };
         }),
       );
-      if (!progress || progress.completedBatches === 0) {
-        window.electronAPI?.deleteProgress(id);
-      }
       setTimeout(processQueue, 50);
     },
     [processQueue],

@@ -46,6 +46,7 @@ export interface AppSettings {
   outputNotes: string;
   autoExportFormats: ExportFormat[];
   preventSleep: boolean;
+  headingCleanupEnabled: boolean;
   fileNaming: FileNaming;
   translationEnabled: boolean;
   translationLanguage: string;
@@ -71,6 +72,7 @@ const DEFAULTS: AppSettings = {
   outputNotes: '',
   autoExportFormats: ['md'],
   preventSleep: true,
+  headingCleanupEnabled: true,
   fileNaming: 'overwrite',
   translationEnabled: false,
   translationLanguage: '',
