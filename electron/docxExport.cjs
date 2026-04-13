@@ -204,12 +204,13 @@ async function convertMarkdownToDocx(markdown) {
           return new TableRow({
             children: cells.map(cellText => {
               const isHeader = isFirstRowHeader && rowIdx === 0;
+              const TABLE_WIDTH_TWIPS = 9360; // 6.5 inches text area
               return new TableCell({
                 children: [new Paragraph({
                   children: makeRuns(cellText, fnKeyToIndex, docx, usedFootnoteIds),
                   spacing: { after: 40 },
                 })],
-                width: { size: Math.floor(100 / cells.length), type: WidthType.PERCENTAGE },
+                width: { size: Math.floor(TABLE_WIDTH_TWIPS / cells.length), type: WidthType.DXA },
                 shading: isHeader ? { fill: 'F0F0F0' } : undefined,
               });
             }),
@@ -218,7 +219,7 @@ async function convertMarkdownToDocx(markdown) {
 
         children.push(new Table({
           rows: wordRows,
-          width: { size: 100, type: WidthType.PERCENTAGE },
+          width: { size: 9360, type: WidthType.DXA },
         }));
         children.push(new Paragraph({ spacing: { after: 120 } }));
       }
@@ -399,6 +400,11 @@ function makeRuns(text, fnKeyToIndex, docx, usedFootnoteIds) {
 
 /** Parse **bold**, *italic*, ***bold+italic***, and <br> into TextRun array. */
 function formatText(text, TextRun) {
+  // Decode HTML entities before processing
+  text = text.replace(/&nbsp;/g, '\u00A0').replace(/&amp;/g, '&')
+             .replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+             .replace(/&quot;/g, '"').replace(/&#(\d+);/g, (_, n) => String.fromCharCode(n));
+
   const runs = [];
   const regex = /(\*\*\*(.+?)\*\*\*|\*\*(.+?)\*\*|\*(.+?)\*|<br\s*\/?>)/gi;
   let lastIdx = 0;
