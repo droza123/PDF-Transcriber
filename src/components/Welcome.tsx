@@ -2,7 +2,7 @@ import { Settings2, Sparkles, Zap, ArrowRight } from 'lucide-react';
 
 interface WelcomeProps {
   onOpenSettings: () => void;
-  onSelectProvider: (provider: 'gemini' | 'openrouter' | 'anthropic') => void;
+  onSelectProvider: (provider: 'gemini' | 'mistral' | 'openrouter' | 'anthropic' | 'custom') => void;
 }
 
 export default function Welcome({ onOpenSettings, onSelectProvider }: WelcomeProps) {
@@ -50,7 +50,19 @@ export default function Welcome({ onOpenSettings, onSelectProvider }: WelcomePro
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="badge badge-free">Free</span>
+                    <span className="text-xs text-p-text-muted"><span className="font-medium text-p-text">Mistral</span> &mdash; dedicated OCR model for accurate extraction</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="badge badge-free">Free</span>
                     <span className="text-xs text-p-text-muted"><span className="font-medium text-p-text">OpenRouter</span> &mdash; hundreds of models, many free</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="badge badge-free">Free</span>
+                    <span className="text-xs text-p-text-muted"><span className="font-medium text-p-text">NVIDIA NIM</span> &mdash; fast vision models via Custom tab</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="badge badge-free">Free</span>
+                    <span className="text-xs text-p-text-muted"><span className="font-medium text-p-text">Groq</span> &mdash; ultra-fast inference via Custom tab</span>
                   </div>
                 </div>
               </div>

@@ -1,5 +1,5 @@
 /** Identifies a supported API provider. */
-export type ProviderId = 'gemini' | 'openrouter' | 'anthropic' | 'openai' | 'custom';
+export type ProviderId = 'gemini' | 'openrouter' | 'anthropic' | 'openai' | 'mistral' | 'custom';
 
 /** Options passed to a single API attempt (no retry logic). */
 export interface ProviderCallOptions {

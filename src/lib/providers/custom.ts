@@ -1,5 +1,5 @@
 import type { Provider, ProviderCallOptions, ProviderModel, ProviderResult } from './types';
-import { getSettings } from '../settings';
+import { getSettings, CUSTOM_PRESETS } from '../settings';
 import { pdfToImages } from '../pdfImages';
 
 export class CustomProvider implements Provider {
@@ -16,7 +16,15 @@ export class CustomProvider implements Provider {
   readonly batchDelayMs = 1000;
 
   private _getBaseUrl(): string {
-    return getSettings().customBaseUrl || 'http://localhost:11434/v1';
+    const { customActiveConfigId, customBaseUrl, customSavedConfigs } = getSettings();
+    if (customActiveConfigId === 'manual') {
+      return customBaseUrl || 'http://localhost:11434/v1';
+    }
+    const preset = CUSTOM_PRESETS.find(p => p.id === customActiveConfigId);
+    if (preset) return preset.baseUrl;
+    const saved = customSavedConfigs.find(c => c.id === customActiveConfigId);
+    if (saved) return saved.baseUrl;
+    return customBaseUrl || 'http://localhost:11434/v1';
   }
 
   async validateKey(key: string): Promise<{ valid: boolean; error?: string }> {
@@ -174,11 +182,21 @@ export class CustomProvider implements Provider {
   }
 
   private _getKeyOptional(): string | null {
-    return localStorage.getItem('provider_api_key_custom') || null;
+    const { customActiveConfigId } = getSettings();
+    if (customActiveConfigId === 'manual') {
+      return localStorage.getItem('provider_api_key_custom') || null;
+    }
+    return localStorage.getItem(`provider_api_key_custom_${customActiveConfigId}`) || null;
   }
 
   private _getFallbackModels(): ProviderModel[] {
-    const { customModels } = getSettings();
+    const { customActiveConfigId, customModels, customSavedConfigs } = getSettings();
+    if (customActiveConfigId !== 'manual') {
+      const saved = customSavedConfigs.find(c => c.id === customActiveConfigId);
+      if (saved && saved.models.length > 0) {
+        return saved.models.map(id => ({ id, displayName: id }));
+      }
+    }
     return customModels.map(id => ({ id, displayName: id }));
   }
 

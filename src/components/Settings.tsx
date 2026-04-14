@@ -3,8 +3,8 @@ import { X, GripVertical, RefreshCw, Info, Eye, EyeOff, Trash2, ExternalLink, Lo
 import { DndContext, closestCenter, type DragEndEvent } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { getSettings, saveSettings, initializeModelPriority, PROVIDER_DEFAULT_MODELS, DEFAULT_TRANSLATION_LANGUAGES, getSessionSkippedModels, type ExportFormat, type FileNaming } from '../lib/settings';
-import { getCachedModels, getApiKey, setApiKey, clearApiKey, hasApiKey, validateAndFetchModels } from '../lib/apiKey';
+import { getSettings, saveSettings, initializeModelPriority, PROVIDER_DEFAULT_MODELS, DEFAULT_TRANSLATION_LANGUAGES, getSessionSkippedModels, CUSTOM_PRESETS, type ExportFormat, type FileNaming, type CustomConfig } from '../lib/settings';
+import { getCachedModels, getApiKey, setApiKey, clearApiKey, hasApiKey, validateAndFetchModels, getCustomConfigApiKey, setCustomConfigApiKey, clearCustomConfigApiKey } from '../lib/apiKey';
 import { getAllProviders, getProvider } from '../lib/providers/registry';
 import type { ProviderId, ProviderModel } from '../lib/providers/types';
 import { OpenRouterProvider } from '../lib/providers/openrouter';
@@ -158,6 +158,10 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
   const [customModels, setCustomModels] = useState<string[]>([]);
   const [newCustomModel, setNewCustomModel] = useState('');
   const [customConnected, setCustomConnected] = useState(false);
+  const [customActiveConfigId, setCustomActiveConfigId] = useState('manual');
+  const [customSavedConfigs, setCustomSavedConfigs] = useState<CustomConfig[]>([]);
+  const [savingConfig, setSavingConfig] = useState(false);
+  const [saveConfigName, setSaveConfigName] = useState('');
 
   useEffect(() => {
     if (open) {
@@ -183,6 +187,10 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
       setCustomBaseUrl(s.customBaseUrl || 'http://localhost:11434/v1');
       setCustomModels(s.customModels || []);
       setCustomConnected((s.customModels || []).length > 0);
+      setCustomActiveConfigId(s.customActiveConfigId || 'manual');
+      setCustomSavedConfigs(s.customSavedConfigs || []);
+      setSavingConfig(false);
+      setSaveConfigName('');
       // Reset key editing state
       setEditingKey(false);
       setKeyValue('');
@@ -198,7 +206,9 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
   }, [open]);
 
   async function handleRefreshModels() {
-    const key = getApiKey(selectedProvider);
+    const key = selectedProvider === 'custom'
+      ? getCustomConfigApiKey(customActiveConfigId)
+      : getApiKey(selectedProvider);
     if (!key) return;
     setRefreshing(true);
     const result = await validateAndFetchModels(selectedProvider, key);
@@ -217,7 +227,7 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
     saveSettings({ customBaseUrl: customBaseUrl.trim() });
     setRefreshing(true);
     const provider = getProvider('custom');
-    const key = getApiKey('custom') || '';
+    const key = getCustomConfigApiKey(customActiveConfigId) || '';
     const models = await provider.fetchModels(key);
     if (models.length > 0) {
       const ids = models.map(m => m.id);
@@ -230,8 +240,97 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
         customModels: ids,
         providerModelPriority: { ...settings.providerModelPriority, custom: ids },
       });
+      // Also update saved config if one is active
+      if (customActiveConfigId !== 'manual' && !CUSTOM_PRESETS.find(p => p.id === customActiveConfigId)) {
+        const updated = customSavedConfigs.map(c =>
+          c.id === customActiveConfigId ? { ...c, models: ids } : c,
+        );
+        setCustomSavedConfigs(updated);
+        saveSettings({ customSavedConfigs: updated });
+      }
     }
     setRefreshing(false);
+  }
+
+  function handleCustomConfigSwitch(configId: string) {
+    // Save current state if in manual mode
+    if (customActiveConfigId === 'manual') {
+      saveSettings({ customBaseUrl, customModels });
+    }
+
+    setCustomActiveConfigId(configId);
+    saveSettings({ customActiveConfigId: configId });
+
+    // Load the new config's state
+    if (configId === 'manual') {
+      const s = getSettings();
+      setCustomBaseUrl(s.customBaseUrl || 'http://localhost:11434/v1');
+      const models = s.customModels || [];
+      setCustomModels(models);
+      setModelPriority(s.providerModelPriority.custom || []);
+      setCustomConnected(models.length > 0);
+    } else {
+      // Preset or saved config — load its base URL
+      const preset = CUSTOM_PRESETS.find(p => p.id === configId);
+      const saved = customSavedConfigs.find(c => c.id === configId);
+      const url = preset?.baseUrl || saved?.baseUrl || '';
+      setCustomBaseUrl(url);
+      // Save URL to settings so CustomProvider._getBaseUrl() can read it
+      saveSettings({ customBaseUrl: url });
+
+      if (saved) {
+        setCustomModels(saved.models);
+        setModelPriority(saved.models);
+        const settings = getSettings();
+        saveSettings({ providerModelPriority: { ...settings.providerModelPriority, custom: saved.models } });
+        setCustomConnected(saved.models.length > 0);
+      } else {
+        // Built-in preset — keep existing models or empty
+        setCustomConnected(false);
+      }
+    }
+
+    // Reset key state on config switch
+    setEditingKey(false);
+    setKeyValue('');
+    setValidationResult(null);
+  }
+
+  function handleSaveConfig() {
+    const name = saveConfigName.trim();
+    if (!name) return;
+    const id = Date.now().toString(36);
+    const newConfig: CustomConfig = {
+      id,
+      name,
+      baseUrl: customBaseUrl,
+      models: [...customModels],
+    };
+
+    // Copy current API key to the new config's key slot
+    const currentKey = getCustomConfigApiKey('manual');
+    if (currentKey) {
+      setCustomConfigApiKey(id, currentKey);
+    }
+
+    const updated = [...customSavedConfigs, newConfig];
+    setCustomSavedConfigs(updated);
+    saveSettings({ customSavedConfigs: updated });
+    setSavingConfig(false);
+    setSaveConfigName('');
+
+    // Switch to the new saved config
+    handleCustomConfigSwitch(id);
+  }
+
+  function handleDeleteSavedConfig(configId: string) {
+    clearCustomConfigApiKey(configId);
+    const updated = customSavedConfigs.filter(c => c.id !== configId);
+    setCustomSavedConfigs(updated);
+    saveSettings({ customSavedConfigs: updated });
+    if (customActiveConfigId === configId) {
+      handleCustomConfigSwitch('manual');
+    }
   }
 
   function handleProviderChange(id: ProviderId) {
@@ -263,6 +362,8 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
       const s = getSettings();
       setCustomBaseUrl(s.customBaseUrl || 'http://localhost:11434/v1');
       setCustomModels(s.customModels || []);
+      setCustomActiveConfigId(s.customActiveConfigId || 'manual');
+      setCustomSavedConfigs(s.customSavedConfigs || []);
     }
   }
 
@@ -295,7 +396,12 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
 
     const result = await validateAndFetchModels(selectedProvider, key);
     if (result.valid) {
-      setApiKey(selectedProvider, key);
+      // For custom provider, store key per-config
+      if (selectedProvider === 'custom') {
+        setCustomConfigApiKey(customActiveConfigId, key);
+      } else {
+        setApiKey(selectedProvider, key);
+      }
       setKeyValue('');
       setEditingKey(false);
       setValidating(false);
@@ -316,7 +422,11 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
   }
 
   function handleKeyClear() {
-    clearApiKey(selectedProvider);
+    if (selectedProvider === 'custom') {
+      clearCustomConfigApiKey(customActiveConfigId);
+    } else {
+      clearApiKey(selectedProvider);
+    }
     setEditingKey(false);
     setKeyValue('');
     setValidationResult(null);
@@ -343,12 +453,13 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
     return () => clearTimeout(timer);
   }, [outputNotes]);
 
-  // Debounce customBaseUrl saves
+  // Debounce customBaseUrl saves (only in manual mode to avoid overwriting
+  // the user's manual URL when a preset sets customBaseUrl state)
   useEffect(() => {
-    if (!open) return;
+    if (!open || customActiveConfigId !== 'manual') return;
     const timer = setTimeout(() => saveSettings({ customBaseUrl }), 300);
     return () => clearTimeout(timer);
-  }, [customBaseUrl]);
+  }, [customBaseUrl, customActiveConfigId]);
 
   if (!open) return null;
 
@@ -495,6 +606,7 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
                 openrouter: 'Access hundreds of models with one key. Many free models available \u2014 the app auto-selects the best ones.',
                 anthropic: 'Premium quality output with native PDF support. Requires a paid API key.',
                 openai: 'Direct access to OpenAI GPT and o-series models. Requires a paid API key.',
+                mistral: 'Dedicated OCR model for accurate PDF extraction. Free tier limited to ~2 requests/minute.',
                 custom: 'Connect to any OpenAI-compatible API (Ollama, LM Studio, etc.). Configure the endpoint and models below.',
               };
               return (
@@ -502,11 +614,178 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
               );
             })()}
 
+            {/* Custom provider config — shown before API key so user picks config first */}
+            {selectedProvider === 'custom' && (
+              <div className="section-divider space-y-3">
+                {/* Config selector pills */}
+                <div>
+                  <label className="section-label block mb-1">Configuration</label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {/* Manual option */}
+                    <button
+                      onClick={() => handleCustomConfigSwitch('manual')}
+                      className={`px-2.5 py-1 text-xs rounded-md border tab-transition ${
+                        customActiveConfigId === 'manual'
+                          ? 'border-p-accent bg-p-accent/8 text-p-accent font-medium'
+                          : 'border-p-border bg-p-bg text-p-text-muted hover:text-p-text hover:border-p-accent/40'
+                      }`}
+                    >
+                      Manual
+                    </button>
+                    {/* Built-in presets */}
+                    {CUSTOM_PRESETS.map(preset => (
+                      <button
+                        key={preset.id}
+                        onClick={() => handleCustomConfigSwitch(preset.id)}
+                        className={`px-2.5 py-1 text-xs rounded-md border tab-transition ${
+                          customActiveConfigId === preset.id
+                            ? 'border-p-accent bg-p-accent/8 text-p-accent font-medium'
+                            : 'border-p-border bg-p-bg text-p-text-muted hover:text-p-text hover:border-p-accent/40'
+                        }`}
+                      >
+                        {preset.name}
+                      </button>
+                    ))}
+                    {/* User-saved configs */}
+                    {customSavedConfigs.map(cfg => (
+                      <div key={cfg.id} className="flex items-center gap-0.5">
+                        <button
+                          onClick={() => handleCustomConfigSwitch(cfg.id)}
+                          className={`px-2.5 py-1 text-xs rounded-l-md border tab-transition ${
+                            customActiveConfigId === cfg.id
+                              ? 'border-p-accent bg-p-accent/8 text-p-accent font-medium'
+                              : 'border-p-border bg-p-bg text-p-text-muted hover:text-p-text hover:border-p-accent/40'
+                          }`}
+                        >
+                          {cfg.name}
+                        </button>
+                        <button
+                          onClick={() => handleDeleteSavedConfig(cfg.id)}
+                          className="px-1 py-1 text-xs rounded-r-md border border-l-0 border-p-border bg-p-bg text-p-text-dim hover:text-p-error hover:border-p-error/40 tab-transition"
+                          title="Delete saved configuration"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Base URL */}
+                <div>
+                  <label className="section-label block mb-1">Base URL</label>
+                  {customActiveConfigId === 'manual' ? (
+                    <>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          value={customBaseUrl}
+                          onChange={e => setCustomBaseUrl(e.target.value)}
+                          onKeyDown={e => e.key === 'Enter' && handleCustomConnect()}
+                          placeholder="http://localhost:11434/v1"
+                          className="flex-1 input-base"
+                        />
+                        <button
+                          onClick={handleCustomConnect}
+                          disabled={refreshing || !customBaseUrl.trim()}
+                          className="p-2 rounded-lg bg-p-accent/12 text-p-accent hover:bg-p-accent/20 disabled:opacity-30 tab-transition"
+                          title="Connect and fetch models"
+                        >
+                          {refreshing ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowRight className="w-4 h-4" />}
+                        </button>
+                      </div>
+                      <div className="flex items-center gap-2 mt-1">
+                        <p className="text-[10px] text-p-text-dim/60">
+                          Ollama: localhost:11434/v1 &middot; LM Studio: localhost:1234/v1
+                        </p>
+                        {customConnected && (
+                          <span className="text-xs text-p-success flex items-center gap-1 shrink-0">
+                            <CheckCircle2 className="w-3 h-3" /> Connected
+                          </span>
+                        )}
+                      </div>
+                    </>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <span className="flex-1 px-3 py-2 text-sm font-mono rounded-lg bg-p-bg-deep border border-p-border text-p-text-muted truncate">
+                        {(() => {
+                          const preset = CUSTOM_PRESETS.find(p => p.id === customActiveConfigId);
+                          if (preset) return preset.baseUrl;
+                          const saved = customSavedConfigs.find(c => c.id === customActiveConfigId);
+                          return saved?.baseUrl || '';
+                        })()}
+                      </span>
+                      <button
+                        onClick={handleCustomConnect}
+                        disabled={refreshing}
+                        className="p-2 rounded-lg bg-p-accent/12 text-p-accent hover:bg-p-accent/20 disabled:opacity-30 tab-transition"
+                        title="Connect and fetch models"
+                      >
+                        {refreshing ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowRight className="w-4 h-4" />}
+                      </button>
+                      {customConnected && (
+                        <span className="text-xs text-p-success flex items-center gap-1 shrink-0">
+                          <CheckCircle2 className="w-3 h-3" /> Connected
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Save configuration (manual mode only) */}
+                {customActiveConfigId === 'manual' && customModels.length > 0 && (
+                  <div>
+                    {savingConfig ? (
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          value={saveConfigName}
+                          onChange={e => setSaveConfigName(e.target.value)}
+                          onKeyDown={e => { if (e.key === 'Enter' && saveConfigName.trim()) handleSaveConfig(); if (e.key === 'Escape') setSavingConfig(false); }}
+                          placeholder="Configuration name..."
+                          className="flex-1 input-base py-1.5"
+                          autoFocus
+                        />
+                        <button
+                          onClick={handleSaveConfig}
+                          disabled={!saveConfigName.trim()}
+                          className="px-3 py-1.5 rounded-lg text-xs font-medium bg-p-accent/12 text-p-accent hover:bg-p-accent/20 disabled:opacity-30 tab-transition"
+                        >
+                          Save
+                        </button>
+                        <button
+                          onClick={() => setSavingConfig(false)}
+                          className="p-1.5 rounded-lg text-p-text-muted hover:bg-p-surface-hover tab-transition"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => setSavingConfig(true)}
+                        className="text-xs text-p-accent hover:text-p-accent-bright tab-transition"
+                      >
+                        Save current configuration...
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* API Key input */}
             {(() => {
-              const currentKey = getApiKey(selectedProvider);
+              const currentKey = selectedProvider === 'custom'
+                ? getCustomConfigApiKey(customActiveConfigId)
+                : getApiKey(selectedProvider);
               const maskedKey = currentKey ? '\u2022\u2022\u2022\u2022\u2022\u2022' + currentKey.slice(-4) : null;
               const provider = getAllProviders().find(p => p.id === selectedProvider);
+              // For custom presets, override help steps from the preset
+              const activePreset = selectedProvider === 'custom'
+                ? CUSTOM_PRESETS.find(p => p.id === customActiveConfigId)
+                : null;
+              const helpSteps = activePreset ? activePreset.keyHelpSteps : provider?.keyHelpSteps;
+              const helpUrl = activePreset ? activePreset.keyHelpUrl : provider?.keyHelpUrl;
 
               if (editingKey) {
                 return (
@@ -590,16 +869,16 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
                   >
                     Enter API Key
                   </button>
-                  {provider && (
+                  {helpSteps && (
                     <div className="text-xs text-p-text-dim leading-relaxed space-y-1">
                       <ol className="list-decimal list-inside space-y-0.5 pl-1">
-                        {provider.keyHelpSteps.map((step, i) => (
+                        {helpSteps.map((step, i) => (
                           <li key={i}>
-                            {i === 0 && provider.keyHelpUrl ? (
+                            {i === 0 && helpUrl ? (
                               <>
                                 Go to{' '}
                                 <a
-                                  href={provider.keyHelpUrl}
+                                  href={helpUrl}
                                   target="_blank"
                                   rel="noopener noreferrer"
                                   className="text-p-accent hover:text-p-accent-bright inline-flex items-center gap-0.5"
@@ -619,41 +898,6 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
               );
             })()}
           </div>
-
-          {/* Custom provider config */}
-          {selectedProvider === 'custom' && (
-            <div className="section-divider">
-              <label className="section-label block mb-1">Base URL</label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="text"
-                  value={customBaseUrl}
-                  onChange={e => setCustomBaseUrl(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && handleCustomConnect()}
-                  placeholder="http://localhost:11434/v1"
-                  className="flex-1 input-base"
-                />
-                <button
-                  onClick={handleCustomConnect}
-                  disabled={refreshing || !customBaseUrl.trim()}
-                  className="p-2 rounded-lg bg-p-accent/12 text-p-accent hover:bg-p-accent/20 disabled:opacity-30 tab-transition"
-                  title="Connect and fetch models"
-                >
-                  {refreshing ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowRight className="w-4 h-4" />}
-                </button>
-              </div>
-              <div className="flex items-center gap-2 mt-1">
-                <p className="text-[10px] text-p-text-dim/60">
-                  Ollama: localhost:11434/v1 &middot; LM Studio: localhost:1234/v1 &middot; Together AI: api.together.xyz/v1
-                </p>
-                {customConnected && (
-                  <span className="text-xs text-p-success flex items-center gap-1 shrink-0">
-                    <CheckCircle2 className="w-3 h-3" /> Connected
-                  </span>
-                )}
-              </div>
-            </div>
-          )}
 
           {/* Model Priority */}
           <div className="section-divider">

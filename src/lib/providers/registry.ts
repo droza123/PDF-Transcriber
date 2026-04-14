@@ -3,13 +3,15 @@ import { GeminiProvider } from './gemini';
 import { AnthropicProvider } from './anthropic';
 import { OpenRouterProvider } from './openrouter';
 import { OpenAIProvider } from './openai';
+import { MistralProvider } from './mistral';
 import { CustomProvider } from './custom';
 import { getSettings } from '../settings';
 
 const providers: Record<ProviderId, Provider> = {
   gemini: new GeminiProvider(),
-  anthropic: new AnthropicProvider(),
+  mistral: new MistralProvider(),
   openrouter: new OpenRouterProvider(),
+  anthropic: new AnthropicProvider(),
   openai: new OpenAIProvider(),
   custom: new CustomProvider(),
 };

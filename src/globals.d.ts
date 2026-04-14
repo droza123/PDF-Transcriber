@@ -1,6 +1,15 @@
 import type { SerializedQueueEntry, HistoryEntry, PartialProgress, LogEntry } from './types';
 
 declare global {
+  interface Uint8Array {
+    toHex(): string;
+    toBase64(): string;
+  }
+
+  interface Uint8ArrayConstructor {
+    fromHex(hex: string): Uint8Array;
+    fromBase64(base64: string): Uint8Array;
+  }
   namespace NodeJS {
     interface ProcessEnv {
       GEMINI_API_KEY?: string;

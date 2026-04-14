@@ -34,10 +34,34 @@ export function hasApiKey(provider?: ProviderId): boolean {
   // Custom provider doesn't require an API key — treat it as configured
   // if models have been set up (user has connected to a server)
   if (p === 'custom') {
-    const { customModels } = getSettings();
-    return customModels.length > 0 || !!getApiKey(p);
+    const { customModels, customActiveConfigId } = getSettings();
+    const key = getCustomConfigApiKey(customActiveConfigId);
+    return customModels.length > 0 || !!key;
   }
   return !!getApiKey(p);
+}
+
+// ── Custom config-specific API key helpers ──
+
+export function getCustomConfigApiKey(configId: string): string | null {
+  if (configId === 'manual') return localStorage.getItem('provider_api_key_custom') || null;
+  return localStorage.getItem(`provider_api_key_custom_${configId}`) || null;
+}
+
+export function setCustomConfigApiKey(configId: string, key: string): void {
+  if (configId === 'manual') {
+    localStorage.setItem('provider_api_key_custom', key);
+  } else {
+    localStorage.setItem(`provider_api_key_custom_${configId}`, key);
+  }
+}
+
+export function clearCustomConfigApiKey(configId: string): void {
+  if (configId === 'manual') {
+    localStorage.removeItem('provider_api_key_custom');
+  } else {
+    localStorage.removeItem(`provider_api_key_custom_${configId}`);
+  }
 }
 
 /** Get cached available models for a provider. */

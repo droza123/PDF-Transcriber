@@ -29,14 +29,64 @@ export const DEFAULT_OPENAI_MODELS = [
   'gpt-5.4-mini',
 ];
 
+export const DEFAULT_MISTRAL_MODELS = [
+  'mistral-ocr-latest',
+  'mistral-small-latest',
+];
+
 /** Per-provider default model lists. */
 export const PROVIDER_DEFAULT_MODELS: Record<ProviderId, string[]> = {
   gemini: DEFAULT_GEMINI_MODELS,
   anthropic: DEFAULT_ANTHROPIC_MODELS,
   openrouter: DEFAULT_OPENROUTER_MODELS,
   openai: DEFAULT_OPENAI_MODELS,
+  mistral: DEFAULT_MISTRAL_MODELS,
   custom: [],
 };
+
+/** A built-in preset for the Custom provider (hardcoded, not user-editable). */
+export interface CustomPreset {
+  id: string;
+  name: string;
+  baseUrl: string;
+  keyHelpUrl: string;
+  keyHelpSteps: string[];
+}
+
+/** A user-saved configuration for the Custom provider. */
+export interface CustomConfig {
+  id: string;
+  name: string;
+  baseUrl: string;
+  models: string[];
+}
+
+export const CUSTOM_PRESETS: CustomPreset[] = [
+  {
+    id: 'nvidia-nim',
+    name: 'NVIDIA NIM',
+    baseUrl: 'https://integrate.api.nvidia.com/v1',
+    keyHelpUrl: 'https://build.nvidia.com/explore/discover',
+    keyHelpSteps: [
+      'NVIDIA Build',
+      'Sign in or create an NVIDIA account',
+      'Click "Get API Key" on any model page',
+      'Copy the key and paste it above',
+    ],
+  },
+  {
+    id: 'groq',
+    name: 'Groq',
+    baseUrl: 'https://api.groq.com/openai/v1',
+    keyHelpUrl: 'https://console.groq.com/keys',
+    keyHelpSteps: [
+      'Groq Console',
+      'Sign in or create an account',
+      'Go to API Keys',
+      'Create a new key and paste it above',
+    ],
+  },
+];
 
 export interface AppSettings {
   activeProvider: ProviderId;
@@ -54,6 +104,8 @@ export interface AppSettings {
   exportTranscriptionWithTranslation: boolean;
   customBaseUrl: string;
   customModels: string[];
+  customSavedConfigs: CustomConfig[];
+  customActiveConfigId: string;
   /**
    * Last folder a user picked through a Save As / Open dialog. Hidden — no UI
    * surface — used to seed the next dialog's defaultPath when the currently
@@ -71,6 +123,7 @@ const DEFAULTS: AppSettings = {
     anthropic: [...DEFAULT_ANTHROPIC_MODELS],
     openrouter: [...DEFAULT_OPENROUTER_MODELS],
     openai: [...DEFAULT_OPENAI_MODELS],
+    mistral: [...DEFAULT_MISTRAL_MODELS],
     custom: [],
   },
   openrouterAutoFreeModels: true,
@@ -86,6 +139,8 @@ const DEFAULTS: AppSettings = {
   exportTranscriptionWithTranslation: true,
   customBaseUrl: 'http://localhost:11434/v1',
   customModels: [],
+  customSavedConfigs: [],
+  customActiveConfigId: 'manual',
   lastBrowsedDir: '',
 };
 
@@ -134,9 +189,20 @@ export function getSettings(): AppSettings {
       if (!parsed.providerModelPriority.openai) {
         parsed.providerModelPriority.openai = [...DEFAULT_OPENAI_MODELS];
       }
+      if (!parsed.providerModelPriority.mistral) {
+        parsed.providerModelPriority.mistral = [...DEFAULT_MISTRAL_MODELS];
+      }
       if (!parsed.providerModelPriority.custom) {
         parsed.providerModelPriority.custom = [];
       }
+    }
+
+    // Ensure custom preset fields exist
+    if (!('customSavedConfigs' in parsed)) {
+      parsed.customSavedConfigs = [];
+    }
+    if (!('customActiveConfigId' in parsed)) {
+      parsed.customActiveConfigId = 'manual';
     }
 
     // Ensure openrouterAutoFreeModels exists
