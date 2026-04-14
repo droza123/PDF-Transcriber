@@ -49,6 +49,17 @@ function preprocessMarkdown(markdown: string): { frontmatterHtml: string; body: 
   return { frontmatterHtml, body };
 }
 
+/** Allow data: URIs (for embedded OCR images) alongside the default safe protocols. */
+function allowDataUris(url: string): string {
+  if (url.startsWith('data:')) return url;
+  const colon = url.indexOf(':');
+  const slash = url.indexOf('/');
+  const q = url.indexOf('?');
+  const h = url.indexOf('#');
+  if (colon === -1 || (slash !== -1 && colon > slash) || (q !== -1 && colon > q) || (h !== -1 && colon > h) || /^(https?|ircs?|mailto|xmpp)$/i.test(url.slice(0, colon))) return url;
+  return '';
+}
+
 /** Render markdown to a full HTML document string. */
 async function renderMarkdownToHtml(markdown: string, title: string): Promise<string> {
   const { createElement } = await import('react');
@@ -63,7 +74,7 @@ async function renderMarkdownToHtml(markdown: string, title: string): Promise<st
   const rehypePlugins: any[] = rehypeRaw ? [rehypeRaw] : [];
 
   const renderedBody = renderToStaticMarkup(
-    createElement(ReactMarkdown, { remarkPlugins: plugins, rehypePlugins } as any, body),
+    createElement(ReactMarkdown, { remarkPlugins: plugins, rehypePlugins, urlTransform: allowDataUris } as any, body),
   );
 
   return `<!DOCTYPE html>

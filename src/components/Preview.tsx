@@ -25,6 +25,18 @@ interface PreviewProps {
 const INITIAL_CHUNKS = 10;
 const CHUNKS_PER_LOAD = 10;
 
+/** Allow data: URIs (for embedded OCR images) alongside the default safe protocols. */
+function urlTransform(url: string): string {
+  if (url.startsWith('data:')) return url;
+  // Fall through to default behavior for all other URLs
+  const colon = url.indexOf(':');
+  const slash = url.indexOf('/');
+  const questionMark = url.indexOf('?');
+  const numberSign = url.indexOf('#');
+  if (colon === -1 || (slash !== -1 && colon > slash) || (questionMark !== -1 && colon > questionMark) || (numberSign !== -1 && colon > numberSign) || /^(https?|ircs?|mailto|xmpp)$/i.test(url.slice(0, colon))) return url;
+  return '';
+}
+
 /** A single chunk of markdown, memoized so it never re-renders unless content changes. */
 const MarkdownChunk = memo(function MarkdownChunk({ content, startHeadingIndex }: { content: string; startHeadingIndex: number }) {
   // Local counter — incremented as headings render in document order within this chunk.
@@ -38,6 +50,7 @@ const MarkdownChunk = memo(function MarkdownChunk({ content, startHeadingIndex }
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
+      urlTransform={urlTransform}
       components={{
         code({ children, className, ...props }) {
           const text = String(children).trim();
