@@ -87,6 +87,8 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
   );
   const outlineDraggingRef = useRef(false);
   const findInputRef = useRef<HTMLInputElement>(null);
+  // Context menu for heading assignment
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; text: string } | null>(null);
 
   useEffect(() => {
     localStorage.setItem('outline_open', outlineOpen ? '1' : '0');
@@ -389,6 +391,59 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
 
   function handlePromote(index: number) { applyLevelChange(index, -1); }
   function handleDemote(index: number) { applyLevelChange(index, +1); }
+
+  // ── Context menu: right-click to set heading level ────────────────────────
+
+  function handleContextMenu(e: React.MouseEvent) {
+    const sel = window.getSelection();
+    const text = sel?.toString().trim();
+    if (!text || text.includes('\n')) return; // only single-line selections
+    e.preventDefault();
+    setCtxMenu({ x: e.clientX, y: e.clientY, text });
+  }
+
+  function applyHeadingFromContextMenu(level: number | null) {
+    if (!ctxMenu) return;
+    const currentMd = cleanedOverride ?? baseMd;
+    const selectedText = ctxMenu.text;
+    setCtxMenu(null);
+
+    // Find the line in markdown that contains this text
+    const lines = currentMd.split('\n');
+    let matchIdx = -1;
+    for (let i = 0; i < lines.length; i++) {
+      const stripped = lines[i].replace(/^#{1,6}\s+/, '').replace(/^\*\*(.+)\*\*$/, '$1').trim();
+      if (stripped === selectedText || lines[i].trim() === selectedText) {
+        matchIdx = i;
+        break;
+      }
+    }
+    if (matchIdx === -1) return;
+
+    // Apply the heading level change
+    const line = lines[matchIdx];
+    const bareText = line.replace(/^#{1,6}\s+/, '').replace(/^\*\*(.+)\*\*$/, '$1').trim();
+    if (level === null) {
+      // Remove heading — convert to plain text
+      lines[matchIdx] = bareText;
+    } else {
+      lines[matchIdx] = '#'.repeat(level) + ' ' + bareText;
+    }
+
+    const newMd = lines.join('\n');
+    setCleanedOverride(newMd);
+    setHeadingEditMode(true);
+    setCleanStats(null);
+    debouncedAutoSave(newMd);
+  }
+
+  // Close context menu on click elsewhere
+  useEffect(() => {
+    if (!ctxMenu) return;
+    const close = () => setCtxMenu(null);
+    window.addEventListener('click', close);
+    return () => window.removeEventListener('click', close);
+  }, [ctxMenu]);
 
   // Scroll to a heading by its document-order index. Forces rendered tab and
   // loads enough chunks for the target heading to be in the DOM.
@@ -970,7 +1025,7 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
               {md}
             </pre>
           ) : (
-            <article className="prose prose-sm prose-pdf max-w-none">
+            <article className="prose prose-sm prose-pdf max-w-none" onContextMenu={handleContextMenu}>
               {frontmatter && (
                 <pre className="frontmatter-block">{frontmatter}</pre>
               )}
@@ -1004,6 +1059,36 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
             <Loader2 className="w-8 h-8 text-p-accent animate-spin" />
             <span className="text-sm text-p-text">Exporting to Word...</span>
           </div>
+        </div>
+      )}
+
+      {/* Heading-level context menu */}
+      {ctxMenu && (
+        <div
+          className="fixed z-[60] bg-p-bg border border-p-border rounded-lg shadow-2xl py-1 min-w-[160px]"
+          style={{ left: ctxMenu.x, top: ctxMenu.y }}
+          onClick={e => e.stopPropagation()}
+        >
+          <div className="px-3 py-1.5 text-[10px] text-p-text-dim border-b border-p-border-subtle truncate max-w-[220px]">
+            {ctxMenu.text}
+          </div>
+          {[1, 2, 3, 4, 5, 6].map(level => (
+            <button
+              key={level}
+              onClick={() => applyHeadingFromContextMenu(level)}
+              className="w-full text-left px-3 py-1.5 text-xs text-p-text hover:bg-p-surface-hover tab-transition flex items-center gap-2"
+            >
+              <span className="font-mono text-p-text-dim w-8">{'#'.repeat(level)}</span>
+              <span>Heading {level}</span>
+            </button>
+          ))}
+          <div className="border-t border-p-border-subtle my-0.5" />
+          <button
+            onClick={() => applyHeadingFromContextMenu(null)}
+            className="w-full text-left px-3 py-1.5 text-xs text-p-text-muted hover:bg-p-surface-hover tab-transition"
+          >
+            Remove heading
+          </button>
         </div>
       )}
     </div>
