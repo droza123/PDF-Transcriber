@@ -165,8 +165,16 @@ export class GeminiProvider implements Provider {
     return false;
   }
 
+  isOverloadedError(error: any): boolean {
+    return (
+      error?.status === 503 ||
+      /503|overloaded|service.?unavailable|temporarily.?unavailable/i.test(error?.message || '')
+    );
+  }
+
   summarizeError(error: any): string {
     if (this.isRateLimitError(error)) return 'rate limited';
+    if (this.isOverloadedError(error)) return 'service overloaded (503)';
     const status = error?.status;
     if (status === 401 || status === 403) return 'auth error';
     if (status === 404) return 'model not found';

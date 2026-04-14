@@ -250,13 +250,21 @@ export class AnthropicProvider implements Provider {
     return false;
   }
 
+  isOverloadedError(error: any): boolean {
+    return (
+      error?.status === 503 ||
+      error?.status === 529 ||
+      /503|529|overloaded|service.?unavailable/i.test(error?.message || '')
+    );
+  }
+
   summarizeError(error: any): string {
     if (this.isRateLimitError(error)) return 'rate limited';
+    if (this.isOverloadedError(error)) return 'API overloaded';
     const status = error?.status;
     if (status === 401 || status === 403) return 'auth error';
     if (status === 404) return 'model not found';
     if (status === 400) return 'bad request';
-    if (status === 529) return 'API overloaded';
     if (status >= 500) return `server error (${status})`;
     return error?.message?.slice(0, 60) || 'unknown error';
   }

@@ -59,5 +59,7 @@ export interface Provider {
   /** Classify errors thrown by call(). */
   isRateLimitError(error: any): boolean;
   isPersistentError(error: any): boolean;
+  /** Transient overload (HTTP 503 / "unavailable"). Service will recover — worth patient retries. */
+  isOverloadedError(error: any): boolean;
   summarizeError(error: any): string;
 }

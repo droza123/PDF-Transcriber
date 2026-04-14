@@ -361,7 +361,7 @@ export default function App() {
               if (pausedRef.current) controller.abort();
             },
             onRetry: (attempt, delay, reason) => {
-              const msg = reason === 'rate_limited' ? `Rate limited \u2014 retrying in ${delay}s...` : `Retrying in ${delay}s (attempt ${attempt})...`;
+              const msg = reason === 'rate_limited' ? `Rate limited \u2014 retrying in ${delay}s...` : reason === 'overloaded' ? `Service overloaded \u2014 retrying in ${delay}s...` : `Retrying in ${delay}s (attempt ${attempt})...`;
               updateJob(jobId, { statusMessage: msg });
             },
           });
@@ -498,7 +498,7 @@ export default function App() {
                 if (pausedRef.current) controller.abort();
               },
               onRetry: (attempt, delay, reason) => {
-                const msg = reason === 'rate_limited' ? `Rate limited \u2014 retrying in ${delay}s...` : `Retrying in ${delay}s (attempt ${attempt})...`;
+                const msg = reason === 'rate_limited' ? `Rate limited \u2014 retrying in ${delay}s...` : reason === 'overloaded' ? `Service overloaded \u2014 retrying in ${delay}s...` : `Retrying in ${delay}s (attempt ${attempt})...`;
                 updateJob(jobId, { statusMessage: msg });
               },
             });
