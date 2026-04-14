@@ -52,20 +52,43 @@ function normalizeBlankLines(text: string): string {
 }
 
 /**
+ * Parse headings from a prescan outline, supporting both formats:
+ * - Markdown headings: `## Title`
+ * - Indented bullet lists: `  - 1. Title (page)`
+ * Returns a map of normalized heading text → heading level (1-6).
+ */
+function parseOutlineHeadings(outline: string): Map<string, number> {
+  const levelMap = new Map<string, number>();
+
+  for (const line of outline.split('\n')) {
+    // Format 1: Markdown headings (# through ######)
+    const hm = line.match(/^(#{1,6})\s+(.+)$/);
+    if (hm) {
+      const key = normalizeHeadingText(hm[2]);
+      if (!levelMap.has(key)) levelMap.set(key, hm[1].length);
+      continue;
+    }
+
+    // Format 2: Indented bullet list (- or * with leading spaces)
+    const lm = line.match(/^(\s*)[*-]\s+(.+)$/);
+    if (lm) {
+      const indent = lm[1].length;
+      const level = Math.min(6, Math.floor(indent / 2) + 1);
+      const key = normalizeHeadingText(lm[2]);
+      if (!levelMap.has(key)) levelMap.set(key, level);
+    }
+  }
+
+  return levelMap;
+}
+
+/**
  * Remap heading levels in OCR markdown to match a prescan outline.
  * Builds a map of normalized heading text → correct level from the outline,
  * then replaces heading prefixes in the markdown.
  */
 function remapHeadingsFromOutline(markdown: string, outline: string): string {
-  // Build heading text → level map from the prescan outline
-  const levelMap = new Map<string, number>();
-  for (const line of outline.split('\n')) {
-    const m = line.match(/^(#{1,6})\s+(.+)$/);
-    if (m) {
-      const key = normalizeHeadingText(m[2]);
-      if (!levelMap.has(key)) levelMap.set(key, m[1].length);
-    }
-  }
+  const levelMap = parseOutlineHeadings(outline);
 
   if (levelMap.size === 0) return markdown;
 
@@ -82,13 +105,27 @@ function remapHeadingsFromOutline(markdown: string, outline: string): string {
     return line;
   }).join('\n');
 
-  console.log(`[convert] Remapped ${remapped} heading level(s) from prescan outline`);
+  console.log(`[convert] Remapped ${remapped} of ${levelMap.size} outline heading(s)`);
   return result;
 }
 
-/** Normalize heading text for fuzzy matching (trim, collapse whitespace, lowercase). */
+/**
+ * Normalize heading text for fuzzy matching:
+ * - Lowercase, collapse whitespace
+ * - Strip trailing page numbers: (3), (v), (xi-xvi)
+ * - Strip leading chapter/section numbers: 1., 1.1, A.
+ * - Strip markdown bold markers: **text**
+ */
 function normalizeHeadingText(text: string): string {
-  return text.trim().replace(/\s+/g, ' ').toLowerCase();
+  return text
+    .trim()
+    .replace(/\*\*/g, '')                          // strip bold markers
+    .replace(/\s*\([ivxlcdm\d\s,–-]+\)\s*$/i, '') // strip trailing page numbers
+    .replace(/^\d+(\.\d+)*\.?\s+/, '')             // strip leading "1.", "1.1", "1.1.1"
+    .replace(/^[A-Z]\.?\s+/, '')                   // strip leading "A.", "B "
+    .replace(/\s+/g, ' ')
+    .toLowerCase()
+    .trim();
 }
 
 /** Build YAML frontmatter from file metadata. */
