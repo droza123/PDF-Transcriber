@@ -7,6 +7,7 @@ import {
   convertPdfBatchToMarkdown,
   batchDelay,
   extractTrailingHeadings,
+  correctOcrHeadingsWithLlm,
 } from './gemini';
 import { cleanHeadings, flattenOutlineHeadings } from './headingCleanup';
 import { getScanProvider, getTranscribeProvider } from './providers/registry';
@@ -316,14 +317,24 @@ export async function convertFile(options: ConvertFileOptions): Promise<string> 
     }
   }
 
-  // For OCR output, remap heading levels to match the prescan outline
+  // For OCR output, use LLM to correct heading levels against the prescan outline
   if (isOcrMode && outline) {
+    onProgress({ statusMessage: 'Correcting headings via LLM...' });
     const joined = results.join('\n\n');
-    const { text: remappedText, remapped: remapCount, outlineSize } = remapHeadingsFromOutline(joined, outline);
+    const { correctedMarkdown, stats } = await correctOcrHeadingsWithLlm(joined, outline, {
+      provider: scanProv,
+      models: scanModels,
+      abortSignal,
+      skipModels,
+      onModelSkip,
+      onModelStart,
+      onStreamProgress,
+      onError,
+    });
     results.length = 0;
-    results.push(remappedText);
-    const remapMsg = `Heading remap: ${remapCount} corrected (${outlineSize} outline entries)`;
-    onProgress({ statusMessage: remapMsg });
+    results.push(correctedMarkdown);
+    const remapMsg = `Heading correction: ${stats.kept} kept, ${stats.demoted} demoted, ${stats.merged} merged (${stats.total} OCR headings)`;
+    onProgress({ statusMessage: remapMsg, streamPhase: undefined, streamChars: 0 });
     console.log(`[convert] ${remapMsg}`);
   }
 

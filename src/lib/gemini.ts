@@ -226,6 +226,153 @@ ${headingList}`;
   }
 }
 
+/**
+ * LLM-assisted heading correction: sends the OCR heading list + prescan outline
+ * to a chat model for structured correction (keep/demote/merge actions).
+ * Falls back to simple text-match remapping on failure.
+ */
+export async function correctOcrHeadingsWithLlm(
+  ocrMarkdown: string,
+  outline: string,
+  options: {
+    provider?: Provider;
+    models?: string[];
+    abortSignal?: AbortSignal;
+    skipModels?: Set<string>;
+    onModelSkip?: (skippedModel: string, nextModel: string | null, reason: string) => void;
+    onModelStart?: (model: string) => void;
+    onStreamProgress?: (phase: 'uploading' | 'processing' | 'streaming', charsReceived: number) => void;
+    onError?: (model: string, reason: string, action: string) => void;
+  } = {},
+): Promise<{ correctedMarkdown: string; stats: { kept: number; demoted: number; merged: number; total: number } }> {
+  const lines = ocrMarkdown.split('\n');
+
+  // Extract heading lines with their 1-based line numbers
+  const headings: { lineNum: number; level: number; text: string }[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(/^(#{1,6})\s+(.+)$/);
+    if (m) headings.push({ lineNum: i + 1, level: m[1].length, text: m[2] });
+  }
+
+  if (headings.length === 0) {
+    return { correctedMarkdown: ocrMarkdown, stats: { kept: 0, demoted: 0, merged: 0, total: 0 } };
+  }
+
+  const headingList = headings.map(h => `Line ${h.lineNum}: ${'#'.repeat(h.level)} ${h.text}`).join('\n');
+
+  const prompt = `You are correcting heading levels in an OCR-extracted document. You have two inputs:
+
+1. STRUCTURAL OUTLINE (from a separate prescan — this is the authoritative structure):
+${outline}
+
+2. OCR HEADING LINES (with line numbers — these need correction):
+${headingList}
+
+For EACH OCR heading line above, output exactly ONE line in this pipe-delimited format:
+LINE_NUMBER|ACTION|LEVEL|CORRECTED_TEXT
+
+Where:
+- LINE_NUMBER: the line number from the OCR list
+- ACTION: one of:
+  - "keep" — this is a real heading, correct its level
+  - "demote" — this should NOT be a heading (e.g., "CHAPTER 2", "ZOOM OUT", "Question:", "Our answer:", figure captions). It will be converted to bold text.
+  - "merge_up" — this line is the continuation of a heading that was split across two lines by OCR. Its text will be appended to the previous heading.
+- LEVEL: the correct heading level (1-6) if ACTION is "keep", or 0 otherwise
+- CORRECTED_TEXT: the heading text (keep original wording but you may fix case to Title Case if appropriate), or empty if demoted/merged
+
+Rules:
+- Match OCR headings to the outline to determine correct levels.
+- Book/document title → level 1
+- Parts (Part One, Part Two) → level 1
+- Chapters → level 2
+- Sections within chapters → level 3
+- Subsections → level 4, sub-subsections → level 5, etc.
+- "CHAPTER N" markers, "ZOOM OUT" headers, "Question:", "Our answer:", "Questions:", "Our answers:" → demote
+- Figure captions → demote
+- If a heading doesn't appear in the outline but clearly belongs to a section, infer its level from context.
+- Output ONLY the pipe-delimited lines, no other text.`;
+
+  try {
+    const result = await callTextWithRetry(prompt, options);
+
+    // Parse the structured response
+    const corrections = new Map<number, { action: string; level: number; text: string }>();
+    for (const line of result.text.split('\n')) {
+      const parts = line.trim().split('|');
+      if (parts.length >= 3) {
+        const lineNum = parseInt(parts[0], 10);
+        const action = parts[1]?.trim().toLowerCase();
+        const level = parseInt(parts[2], 10);
+        const text = parts.slice(3).join('|').trim();
+        if (!isNaN(lineNum) && (action === 'keep' || action === 'demote' || action === 'merge_up')) {
+          corrections.set(lineNum, { action, level: isNaN(level) ? 0 : level, text });
+        }
+      }
+    }
+
+    // Apply corrections
+    let kept = 0, demoted = 0, merged = 0;
+    const resultLines = [...lines];
+    let mergeIntoNext = '';
+
+    for (let i = 0; i < resultLines.length; i++) {
+      const lineNum = i + 1;
+      const correction = corrections.get(lineNum);
+      if (!correction) {
+        // If we have pending merge text and this is a heading, prepend it
+        if (mergeIntoNext && /^#{1,6}\s+/.test(resultLines[i])) {
+          const hm = resultLines[i].match(/^(#{1,6})\s+(.+)$/);
+          if (hm) {
+            resultLines[i] = `${hm[1]} ${mergeIntoNext} ${hm[2]}`;
+            mergeIntoNext = '';
+          }
+        }
+        continue;
+      }
+
+      const hm = resultLines[i].match(/^(#{1,6})\s+(.+)$/);
+      if (!hm) continue;
+
+      switch (correction.action) {
+        case 'keep':
+          if (correction.level >= 1 && correction.level <= 6) {
+            const text = correction.text || hm[2];
+            resultLines[i] = '#'.repeat(correction.level) + ' ' + text;
+            kept++;
+          }
+          // Apply any pending merge
+          if (mergeIntoNext) {
+            resultLines[i] = resultLines[i].replace(/^(#{1,6})\s+/, `$1 ${mergeIntoNext} `);
+            mergeIntoNext = '';
+          }
+          break;
+        case 'demote':
+          resultLines[i] = `**${hm[2]}**`;
+          demoted++;
+          break;
+        case 'merge_up':
+          mergeIntoNext = hm[2];
+          resultLines[i] = ''; // remove the split line
+          merged++;
+          break;
+      }
+    }
+
+    console.log(`[heading-llm] Applied: ${kept} kept, ${demoted} demoted, ${merged} merged (${corrections.size} instructions from LLM)`);
+    return {
+      correctedMarkdown: resultLines.join('\n'),
+      stats: { kept, demoted, merged, total: headings.length },
+    };
+  } catch (e: any) {
+    console.warn(`[heading-llm] LLM correction failed, falling back to simple remap: ${e.message}`);
+    // Fall back to simple text matching
+    return {
+      correctedMarkdown: ocrMarkdown,
+      stats: { kept: 0, demoted: 0, merged: 0, total: headings.length },
+    };
+  }
+}
+
 /** Pause between batches to respect rate limits. */
 export function batchDelay(provider?: Provider): Promise<void> {
   const prov = provider ?? getTranscribeProvider();

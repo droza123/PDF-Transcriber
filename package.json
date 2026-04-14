@@ -1,7 +1,7 @@
 {
   "name": "pdf-transformer",
   "private": true,
-  "version": "1.40.2",
+  "version": "1.41.0",
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
