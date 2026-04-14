@@ -424,6 +424,9 @@ export default function App() {
               if (update.statusMessage?.startsWith('Structure scan complete')) {
                 addLogEntry(jobId, fileName, 'success', update.statusMessage);
               }
+              if (update.statusMessage?.startsWith('Heading remap:')) {
+                addLogEntry(jobId, fileName, 'info', update.statusMessage);
+              }
               if (update.errorDetail) {
                 addLogEntry(jobId, fileName, 'error', update.errorDetail);
               }
