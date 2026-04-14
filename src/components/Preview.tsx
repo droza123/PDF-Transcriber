@@ -69,11 +69,41 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
   const [exportOpen, setExportOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [outlineOpen, setOutlineOpen] = useState<boolean>(() => localStorage.getItem('outline_open') === '1');
+  const [outlineWidth, setOutlineWidth] = useState(() =>
+    parseInt(localStorage.getItem('outline_width') || '240', 10),
+  );
+  const outlineDraggingRef = useRef(false);
   const findInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     localStorage.setItem('outline_open', outlineOpen ? '1' : '0');
   }, [outlineOpen]);
+
+  useEffect(() => {
+    localStorage.setItem('outline_width', String(outlineWidth));
+  }, [outlineWidth]);
+
+  const handleOutlineDragStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    outlineDraggingRef.current = true;
+    const startX = e.clientX;
+    const startWidth = outlineWidth;
+    const onMove = (ev: MouseEvent) => {
+      if (!outlineDraggingRef.current) return;
+      setOutlineWidth(Math.min(500, Math.max(160, startWidth + (ev.clientX - startX))));
+    };
+    const onUp = () => {
+      outlineDraggingRef.current = false;
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  }, [outlineWidth]);
 
   const baseMd = job?.markdown ?? externalMd ?? '';
   const fileName = job?.fileName ?? externalName ?? 'document.pdf';
@@ -279,7 +309,7 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
         return next;
       });
     } else if (e.ctrlKey || e.metaKey) {
-      // Toggle select
+      // Toggle select (add/remove without clearing others)
       setSelectedHeadings(prev => {
         const next = new Set(prev);
         if (next.has(index)) next.delete(index); else next.add(index);
@@ -287,7 +317,9 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
       });
       setLastSelectedIndex(index);
     } else {
-      // Plain click: navigate only, don't change selection
+      // Plain click: select this heading only (deselect all others) + scroll
+      setSelectedHeadings(new Set([index]));
+      setLastSelectedIndex(index);
       scrollToHeading(index);
     }
   }
@@ -796,69 +828,73 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
       <div className={`flex-1 overflow-hidden flex`}>
         {/* Outline sidebar */}
         {outlineOpen && (
-          <aside className="w-60 border-r border-p-border overflow-auto shrink-0 bg-p-surface/30">
-            <div className="sticky top-0 px-3 py-2 border-b border-p-border bg-p-surface text-xs font-medium text-p-text-dim flex items-center justify-between z-10">
-              <span className="flex items-center gap-1.5">
-                <ListTree className="w-3.5 h-3.5" />
-                Outline
-              </span>
-              <button
-                onClick={() => setOutlineOpen(false)}
-                className="text-p-text-dim hover:text-p-text"
-                title="Hide outline"
-              >
-                <X className="w-3 h-3" />
-              </button>
-            </div>
-            {outline.length === 0 ? (
-              <p className="px-3 py-3 text-xs text-p-text-dim italic">No headings found</p>
-            ) : (
-              <ul className="py-1">
-                {outline.map(h => (
-                  <li key={h.index} className="group/item relative">
-                    <button
-                      onClick={(e) => {
-                        if (e.ctrlKey || e.metaKey || e.shiftKey) {
-                          handleOutlineClick(h.index, e);
-                        } else {
-                          scrollToHeading(h.index);
-                        }
-                      }}
-                      className={`w-full text-left py-1 pr-10 text-xs truncate tab-transition ${
-                        selectedHeadings.has(h.index)
-                          ? 'bg-p-accent/10 text-p-accent'
-                          : 'text-p-text hover:bg-p-surface-hover'
-                      }`}
-                      style={{ paddingLeft: 12 + (h.level - 1) * 12 }}
-                      title={`${h.text} (H${h.level})`}
-                    >
-                      <span className="text-p-text-dim text-[10px] mr-1 font-mono">H{h.level}</span>
-                      {h.text}
-                    </button>
-                    {/* Hover promote/demote buttons */}
-                    <div className="absolute right-1 top-1/2 -translate-y-1/2 hidden group-hover/item:flex items-center gap-0.5">
+          <>
+            <aside
+              className="border-r border-p-border overflow-auto shrink-0 bg-p-surface/30"
+              style={{ width: outlineWidth, minWidth: 160 }}
+            >
+              <div className="sticky top-0 px-3 py-2 border-b border-p-border bg-p-surface text-xs font-medium text-p-text-dim flex items-center justify-between z-10">
+                <span className="flex items-center gap-1.5">
+                  <ListTree className="w-3.5 h-3.5" />
+                  Outline
+                </span>
+                <button
+                  onClick={() => setOutlineOpen(false)}
+                  className="text-p-text-dim hover:text-p-text"
+                  title="Hide outline"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+              {outline.length === 0 ? (
+                <p className="px-3 py-3 text-xs text-p-text-dim italic">No headings found</p>
+              ) : (
+                <ul className="py-1">
+                  {outline.map(h => (
+                    <li key={h.index} className="group/item relative">
                       <button
-                        onClick={(e) => { e.stopPropagation(); handlePromote(h.index); }}
-                        className="p-0.5 rounded text-p-text-dim hover:text-p-accent hover:bg-p-surface-hover tab-transition"
-                        title="Promote (decrease heading level)"
-                        disabled={h.level <= 1}
+                        onClick={(e) => handleOutlineClick(h.index, e)}
+                        className={`w-full text-left py-1 pr-10 text-xs truncate tab-transition ${
+                          selectedHeadings.has(h.index)
+                            ? 'bg-p-accent/10 text-p-accent'
+                            : 'text-p-text hover:bg-p-surface-hover'
+                        }`}
+                        style={{ paddingLeft: 12 + (h.level - 1) * 12 }}
+                        title={h.text}
                       >
-                        <ChevronLeft className="w-3.5 h-3.5" />
+                        {h.text}
                       </button>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); handleDemote(h.index); }}
-                        className="p-0.5 rounded text-p-text-dim hover:text-p-accent hover:bg-p-surface-hover tab-transition"
-                        title="Demote (increase heading level)"
-                        disabled={h.level >= 6}
-                      >
-                        <ChevronRight className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </aside>
+                      {/* Hover promote/demote buttons */}
+                      <div className="absolute right-1 top-1/2 -translate-y-1/2 hidden group-hover/item:flex items-center gap-0.5">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handlePromote(h.index); }}
+                          className="p-0.5 rounded text-p-text-dim hover:text-p-accent hover:bg-p-surface-hover tab-transition"
+                          title="Promote (decrease heading level)"
+                          disabled={h.level <= 1}
+                        >
+                          <ChevronLeft className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleDemote(h.index); }}
+                          className="p-0.5 rounded text-p-text-dim hover:text-p-accent hover:bg-p-surface-hover tab-transition"
+                          title="Demote (increase heading level)"
+                          disabled={h.level >= 6}
+                        >
+                          <ChevronRight className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </aside>
+            {/* Outline resize handle */}
+            <div
+              className="w-1.5 cursor-col-resize shrink-0 hover:bg-p-accent/20 tab-transition"
+              onMouseDown={handleOutlineDragStart}
+              title="Drag to resize outline"
+            />
+          </>
         )}
 
         {/* PDF pane */}
