@@ -249,11 +249,13 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
   const renderedAreaRef = useRef<HTMLDivElement>(null);
   const [avgChunkHeight, setAvgChunkHeight] = useState(0);
 
-  // Reset loaded count and scroll position when document changes
+  // Reset loaded count and scroll position when document changes (but not during heading edits)
   useEffect(() => {
-    setLoadedCount(INITIAL_CHUNKS);
-    setAvgChunkHeight(0);
-    contentRef.current?.scrollTo(0, 0);
+    if (!headingEditMode) {
+      setLoadedCount(INITIAL_CHUNKS);
+      setAvgChunkHeight(0);
+      contentRef.current?.scrollTo(0, 0);
+    }
   }, [md]);
 
   // Measure rendered chunk area to estimate total document height
