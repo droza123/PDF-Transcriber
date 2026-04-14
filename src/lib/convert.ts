@@ -7,6 +7,7 @@ import {
   convertPdfBatchToMarkdown,
   batchDelay,
   extractTrailingHeadings,
+  correctOcrHeadings,
 } from './gemini';
 import { cleanHeadings, flattenOutlineHeadings } from './headingCleanup';
 import { getActiveProvider } from './providers/registry';
@@ -241,10 +242,25 @@ export async function convertFile(options: ConvertFileOptions): Promise<string> 
     }
   }
 
-  // For OCR models that skipped the prescan, derive the outline from conversion output
+  // For OCR models that skipped the prescan, correct heading levels via a chat model
+  // and derive the outline from the corrected output
   if (!outline) {
-    outline = extractOutlineFromMarkdown(results.join('\n\n'));
-    console.log(`[convert] Outline derived from OCR output (${outline.length} chars)`);
+    onProgress({ statusMessage: 'Correcting heading levels...' });
+    const joined = results.join('\n\n');
+    const correction = await correctOcrHeadings(joined, {
+      abortSignal,
+      skipModels,
+      onModelSkip,
+      onModelStart,
+      onStreamProgress,
+      onError,
+    });
+    outline = correction.outline;
+    // Replace results with heading-corrected version
+    results.length = 0;
+    results.push(correction.correctedMarkdown);
+    onProgress({ streamPhase: undefined, streamChars: 0 });
+    console.log(`[convert] Headings corrected, outline has ${outline.split('\n').length} entries`);
   }
 
   // Assemble final output

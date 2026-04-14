@@ -146,6 +146,82 @@ export async function convertPdfBatchToMarkdown(
   });
 }
 
+/**
+ * Send OCR-extracted headings to a chat model for level correction.
+ * Returns the corrected outline string, or the original if correction fails.
+ */
+export async function correctOcrHeadings(
+  ocrMarkdown: string,
+  options: {
+    onRetry?: (attempt: number, delaySec: number, reason?: string) => void;
+    abortSignal?: AbortSignal;
+    skipModels?: Set<string>;
+    onModelSkip?: (skippedModel: string, nextModel: string | null, reason: string) => void;
+    onModelStart?: (model: string) => void;
+    onStreamProgress?: (phase: 'uploading' | 'processing' | 'streaming', charsReceived: number) => void;
+    onError?: (model: string, reason: string, action: string) => void;
+  } = {},
+): Promise<{ outline: string; correctedMarkdown: string }> {
+  // Extract heading lines from OCR output
+  const headingLines: { line: string; text: string }[] = [];
+  for (const line of ocrMarkdown.split('\n')) {
+    const m = line.match(/^(#{1,6})\s+(.+)$/);
+    if (m) headingLines.push({ line: line.trim(), text: m[2].trim() });
+  }
+
+  if (headingLines.length === 0) {
+    return { outline: '', correctedMarkdown: ocrMarkdown };
+  }
+
+  const headingList = headingLines.map(h => h.line).join('\n');
+
+  const prompt = `The following is a list of headings extracted from a document by OCR. The heading levels (# through ######) may be incorrect because the OCR model guessed them from visual appearance rather than logical structure.
+
+Correct the heading levels to reflect the document's actual hierarchy:
+- # for the top-level divisions (Parts, major sections, book title)
+- ## for chapters or primary sections
+- ### for subsections
+- #### and deeper for sub-subsections
+- Use contextual clues: numbering patterns (1, 1.1, 1.1.1), "Part/Chapter/Section" labels, indentation in numbering
+- Return ONLY the corrected heading lines, one per line, in the same order
+- Do not add, remove, or reword any headings — keep the text exactly as-is, only change the # level
+
+Headings:
+${headingList}`;
+
+  try {
+    const result = await callTextWithRetry(prompt, options);
+    const correctedLines = result.text.trim().split('\n')
+      .map(l => l.trim())
+      .filter(l => /^#{1,6}\s+/.test(l));
+
+    // Build mapping: original heading text → corrected # prefix
+    // Match by position (order preserved) rather than text to handle duplicates
+    let correctedMarkdown = ocrMarkdown;
+    const outline: string[] = [];
+    const count = Math.min(headingLines.length, correctedLines.length);
+    for (let i = 0; i < count; i++) {
+      const original = headingLines[i].line;
+      const corrected = correctedLines[i];
+      outline.push(corrected);
+      if (original !== corrected) {
+        // Replace first occurrence of this exact line that hasn't been replaced yet
+        correctedMarkdown = correctedMarkdown.replace(original, corrected);
+      }
+    }
+    // Include any headings that weren't in the corrected list (beyond count)
+    for (let i = count; i < headingLines.length; i++) {
+      outline.push(headingLines[i].line);
+    }
+
+    console.log(`[heading-correction] Corrected ${count} heading(s) via LLM`);
+    return { outline: outline.join('\n'), correctedMarkdown };
+  } catch (e: any) {
+    console.warn(`[heading-correction] LLM correction failed, using original headings: ${e.message}`);
+    return { outline: headingList, correctedMarkdown: ocrMarkdown };
+  }
+}
+
 /** Pause between batches to respect rate limits. */
 export function batchDelay(): Promise<void> {
   const provider = getActiveProvider();
