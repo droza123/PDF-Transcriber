@@ -129,6 +129,39 @@ export class MistralProvider implements Provider {
     return /^mistral-ocr/i.test(model);
   }
 
+  /**
+   * Extract a printed page number from OCR header/footer text.
+   * Looks for an isolated arabic number or roman numeral.
+   */
+  static _extractPageNumber(header?: string | null, footer?: string | null): string | null {
+    // Check footer first (most common location for page numbers), then header
+    for (const text of [footer, header]) {
+      if (!text) continue;
+      const trimmed = text.trim();
+      // Match an isolated number (arabic) or roman numeral
+      // Page numbers are usually standalone or surrounded by whitespace/punctuation
+      const m = trimmed.match(/(?:^|\s)(\d{1,4})(?:\s|$)/) ||
+                trimmed.match(/(?:^|\s)([ivxlcdm]{1,8})(?:\s|$)/i);
+      if (m) {
+        const candidate = m[1].trim();
+        // Validate roman numerals (must be a valid sequence, not random letters)
+        if (/^[ivxlcdm]+$/i.test(candidate)) {
+          if (/^[ivxlcdm]+$/i.test(candidate) && MistralProvider._isValidRoman(candidate)) {
+            return candidate.toLowerCase();
+          }
+        } else {
+          return candidate;
+        }
+      }
+    }
+    return null;
+  }
+
+  /** Check if a string is a valid roman numeral (not just random letters). */
+  static _isValidRoman(s: string): boolean {
+    return /^m{0,3}(cm|cd|d?c{0,3})(xc|xl|l?x{0,3})(ix|iv|v?i{0,3})$/i.test(s) && s.length > 0;
+  }
+
   private _getKey(): string {
     const key = localStorage.getItem('provider_api_key_mistral') || null;
     if (!key) throw new Error('Mistral API key is required. Configure it in the settings above.');
@@ -168,8 +201,8 @@ export class MistralProvider implements Provider {
         },
         include_image_base64: true,
         table_format: 'markdown',
-        extract_header: false,
-        extract_footer: false,
+        extract_header: true,
+        extract_footer: true,
       }),
       signal: abortSignal,
     });
@@ -182,9 +215,16 @@ export class MistralProvider implements Provider {
     }
 
     const data = await res.json();
-    const pages: { index: number; markdown: string; images?: { id: string; image_base64?: string }[] }[] = data.pages || [];
+    const pages: {
+      index: number;
+      markdown: string;
+      header?: string | null;
+      footer?: string | null;
+      images?: { id: string; image_base64?: string }[];
+    }[] = data.pages || [];
 
     let imageCount = 0;
+    let pageNumberCount = 0;
     const text = pages
       .map(p => {
         let md = p.markdown;
@@ -192,20 +232,26 @@ export class MistralProvider implements Provider {
         if (p.images?.length) {
           for (const img of p.images) {
             if (!img.id || !img.image_base64) continue;
-            // The API may return a raw base64 string or a full data URI — handle both
             const dataUri = img.image_base64.startsWith('data:')
               ? img.image_base64
               : `data:image/jpeg;base64,${img.image_base64}`;
-            // OCR markdown uses ![id](id) as placeholder — replace the URL part
             md = md.replaceAll(`](${img.id})`, `](${dataUri})`);
             imageCount++;
           }
         }
-        return `<!-- page: ${p.index + 1} -->\n${md}`;
+
+        // Extract printed page number from header or footer
+        const printedPage = MistralProvider._extractPageNumber(p.header, p.footer);
+        if (printedPage) {
+          pageNumberCount++;
+          return `<!-- page: ${printedPage} -->\n${md}`;
+        }
+        // No printed page number found — omit the marker rather than use a PDF index
+        return md;
       })
       .join('\n\n');
 
-    console.log(`[mistral] OCR complete, received ${text.length} chars from ${pages.length} page(s), ${imageCount} image(s) embedded`);
+    console.log(`[mistral] OCR complete, received ${text.length} chars from ${pages.length} page(s), ${imageCount} image(s) embedded, ${pageNumberCount} page number(s) extracted`);
     onStreamProgress?.('streaming', text.length);
 
     return { text, modelUsed: model };
