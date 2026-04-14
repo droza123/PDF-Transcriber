@@ -13,7 +13,7 @@ async function convertMarkdownToDocxLogos(markdown) {
   const docx = await import('docx');
   const {
     Document, Packer, Paragraph, TextRun, HeadingLevel,
-    FootnoteReferenceRun, BorderStyle,
+    FootnoteReferenceRun, BorderStyle, ImageRun,
     Table, TableRow, TableCell, WidthType, AlignmentType,
   } = docx;
 
@@ -225,6 +225,13 @@ async function convertMarkdownToDocxLogos(markdown) {
       continue;
     }
 
+    // ── Standalone images ──────────────────────────────────────────────
+    const imgMatch = trimmed.match(/^!\[([^\]]*)\]\((data:image\/[^;]+;base64,[A-Za-z0-9+/=]+)\)$/);
+    if (imgMatch) {
+      const imgPara = makeImageParagraph(imgMatch[1], imgMatch[2], ImageRun, Paragraph, TextRun);
+      if (imgPara) { children.push(...imgPara); i++; continue; }
+    }
+
     // ── Regular paragraph ──────────────────────────────────────────────
     const paraLines = [];
     while (i < lines.length) {
@@ -232,6 +239,7 @@ async function convertMarkdownToDocxLogos(markdown) {
       if (!pl || pl === '---' || pl.startsWith('#') || pl.startsWith('>') ||
           pl.startsWith('|') || pl.startsWith('```') || pl.startsWith('<!--')) break;
       if (/^\[\^\w+\]:\s/.test(pl)) break;
+      if (/^!\[.*\]\(data:image\//.test(pl)) break;
       paraLines.push(pl);
       i++;
     }
@@ -413,6 +421,74 @@ function formatText(text, TextRun) {
     runs.push(new TextRun({ text: text.slice(lastIdx), font: 'Times New Roman' }));
   }
   return runs;
+}
+
+/**
+ * Decode a data:image/... URI and build an ImageRun paragraph.
+ * Returns an array of paragraphs (image + optional caption), or null on failure.
+ */
+function makeImageParagraph(alt, dataUri, ImageRun, Paragraph, TextRun) {
+  try {
+    const commaIdx = dataUri.indexOf(',');
+    if (commaIdx === -1) return null;
+    const b64 = dataUri.slice(commaIdx + 1);
+    const buf = Buffer.from(b64, 'base64');
+
+    const dims = getImageDimensions(buf);
+    const MAX_WIDTH = 914400 * 6;
+    let w = dims?.width || 400;
+    let h = dims?.height || 300;
+    if (w * 914400 / 96 > MAX_WIDTH) {
+      const scale = MAX_WIDTH / (w * 914400 / 96);
+      w = Math.round(w * scale);
+      h = Math.round(h * scale);
+    }
+
+    const result = [
+      new Paragraph({
+        children: [
+          new ImageRun({
+            data: buf,
+            transformation: { width: w, height: h },
+            type: 'png',
+          }),
+        ],
+        spacing: { before: 120, after: alt ? 40 : 120 },
+      }),
+    ];
+
+    if (alt) {
+      result.push(new Paragraph({
+        children: [new TextRun({ text: alt, italics: true, size: 18, color: '666666', font: 'Times New Roman' })],
+        spacing: { after: 120 },
+      }));
+    }
+
+    return result;
+  } catch (e) {
+    console.warn('[docx-logos] Failed to embed image:', e.message);
+    return null;
+  }
+}
+
+/** Best-effort image dimension reader for PNG and JPEG. */
+function getImageDimensions(buf) {
+  if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4E && buf[3] === 0x47) {
+    return { width: buf.readUInt32BE(16), height: buf.readUInt32BE(20) };
+  }
+  if (buf[0] === 0xFF && buf[1] === 0xD8) {
+    let offset = 2;
+    while (offset < buf.length - 9) {
+      if (buf[offset] !== 0xFF) { offset++; continue; }
+      const marker = buf[offset + 1];
+      if (marker === 0xC0 || marker === 0xC2) {
+        return { height: buf.readUInt16BE(offset + 5), width: buf.readUInt16BE(offset + 7) };
+      }
+      const segLen = buf.readUInt16BE(offset + 2);
+      offset += 2 + segLen;
+    }
+  }
+  return null;
 }
 
 module.exports = { convertMarkdownToDocxLogos };

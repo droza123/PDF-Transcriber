@@ -166,6 +166,7 @@ export class MistralProvider implements Provider {
           type: 'document_url',
           document_url: `data:application/pdf;base64,${base64}`,
         },
+        include_image_base64: true,
         table_format: 'markdown',
         extract_header: false,
         extract_footer: false,
@@ -181,12 +182,30 @@ export class MistralProvider implements Provider {
     }
 
     const data = await res.json();
-    const pages: { index: number; markdown: string }[] = data.pages || [];
+    const pages: { index: number; markdown: string; images?: { id: string; image_base64?: string }[] }[] = data.pages || [];
+
+    let imageCount = 0;
     const text = pages
-      .map(p => `<!-- page: ${p.index + 1} -->\n${p.markdown}`)
+      .map(p => {
+        let md = p.markdown;
+        // Replace image placeholder URLs with inline base64 data URIs
+        if (p.images?.length) {
+          for (const img of p.images) {
+            if (!img.image_base64 || !img.id) continue;
+            // Detect MIME from id extension, default to jpeg
+            const ext = img.id.split('.').pop()?.toLowerCase() || 'jpeg';
+            const mime = ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg';
+            const dataUri = `data:${mime};base64,${img.image_base64}`;
+            // OCR markdown uses ![id](id) as placeholder — replace the URL part
+            md = md.replaceAll(`](${img.id})`, `](${dataUri})`);
+            imageCount++;
+          }
+        }
+        return `<!-- page: ${p.index + 1} -->\n${md}`;
+      })
       .join('\n\n');
 
-    console.log(`[mistral] OCR complete, received ${text.length} chars from ${pages.length} page(s)`);
+    console.log(`[mistral] OCR complete, received ${text.length} chars from ${pages.length} page(s), ${imageCount} image(s) embedded`);
     onStreamProgress?.('streaming', text.length);
 
     return { text, modelUsed: model };
