@@ -14,8 +14,16 @@
  * the same style as stripCodeFences / normalizeBlankLines in convert.ts.
  */
 
-/** Matches a markdown heading line; capped at H6 to match DOCX export limits. */
-const HEADING_RE = /^(#{1,6})\s+(.+?)\s*$/;
+/** Matches a markdown heading line; capped at H6 to match DOCX export limits.
+ *  Also strips trailing `#` characters (ATX closing syntax). This is the
+ *  canonical heading regex — Preview.tsx's outline builder and the
+ *  `changeHeadingLevels` function both use `forEachHeading` which delegates
+ *  here, guaranteeing index alignment. */
+export const HEADING_LINE_RE = /^(#{1,6})\s+(.+?)\s*#*\s*$/;
+
+/** @deprecated Internal alias kept so the existing cleanup functions compile
+ *  without a rename sweep. Points to the same regex as HEADING_LINE_RE. */
+const HEADING_RE = HEADING_LINE_RE;
 
 /** Proximity window for B1 (in raw line count). Running headers recur every
  *  ~30-40 lines (one page); batch-boundary repeats are within a few lines.
@@ -229,6 +237,79 @@ export function flattenOutlineHeadings(markdown: string): string {
   }
 
   return out.join('\n');
+}
+
+// ── Shared heading iteration ────────────────────────────────────────────────
+
+/** Callback receives: heading index (0-based document order), the `#` prefix
+ *  string, the heading text (trailing `#` stripped), and the 0-based line
+ *  index within the body lines array. */
+export type HeadingVisitor = (
+  headingIndex: number,
+  hashes: string,
+  text: string,
+  lineIndex: number,
+) => void;
+
+/** Walk all heading lines in a markdown body (frontmatter already stripped),
+ *  skipping fenced code blocks, in document order. Uses `HEADING_LINE_RE` so
+ *  the indices are consistent with the outline sidebar and
+ *  `changeHeadingLevels`. */
+export function forEachHeading(body: string, visitor: HeadingVisitor): void {
+  const lines = body.split('\n');
+  let inFence = false;
+  let hi = 0;
+  for (let li = 0; li < lines.length; li++) {
+    if (/^```/.test(lines[li].trim())) { inFence = !inFence; continue; }
+    if (inFence) continue;
+    const m = lines[li].match(HEADING_LINE_RE);
+    if (m) {
+      visitor(hi, m[1], m[2], li);
+      hi++;
+    }
+  }
+}
+
+// ── Heading-level rewriting ─────────────────────────────────────────────────
+
+/**
+ * Change heading levels for specific headings identified by their document-order
+ * index. Takes the FULL markdown string (with frontmatter) and a Map of
+ * `headingIndex → newLevel` (1–6). Returns the modified full markdown.
+ *
+ * All changes are applied in a single pass so multi-select promote/demote is
+ * O(n) in document lines, not O(n × changes).
+ */
+export function changeHeadingLevels(
+  fullMarkdown: string,
+  changes: Map<number, number>,
+): string {
+  if (changes.size === 0) return fullMarkdown;
+
+  // Split frontmatter from body (same logic as Preview.tsx)
+  const fmMatch = fullMarkdown.match(/^---\n([\s\S]*?)\n---\n?/);
+  const fmPrefix = fmMatch ? fmMatch[0] : '';
+  const body = fmMatch ? fullMarkdown.slice(fmMatch[0].length) : fullMarkdown;
+
+  const lines = body.split('\n');
+  let inFence = false;
+  let hi = 0;
+
+  for (let li = 0; li < lines.length; li++) {
+    if (/^```/.test(lines[li].trim())) { inFence = !inFence; continue; }
+    if (inFence) continue;
+    const m = lines[li].match(HEADING_LINE_RE);
+    if (m) {
+      const newLevel = changes.get(hi);
+      if (newLevel !== undefined) {
+        const clamped = Math.max(1, Math.min(6, newLevel));
+        lines[li] = '#'.repeat(clamped) + ' ' + m[2];
+      }
+      hi++;
+    }
+  }
+
+  return fmPrefix + lines.join('\n');
 }
 
 /**

@@ -1,10 +1,10 @@
 import { useState, useEffect, useCallback, useRef, useMemo, memo, startTransition } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Copy, Check, Download, FolderOpen, Hash, Table2, BookOpen, Footprints, Search, X, ChevronDown, ChevronUp, Columns2, FileText, Loader2, Radio, ListTree, Sparkles, RotateCcw, Save } from 'lucide-react';
+import { Copy, Check, Download, FolderOpen, Hash, Table2, BookOpen, Footprints, Search, X, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Columns2, FileText, Loader2, Radio, ListTree, Sparkles, RotateCcw, Save } from 'lucide-react';
 import type { ConversionJob } from '../types';
 import { downloadMarkdown, showInFolder, exportAsHtml, exportAsJson, exportAsDocx } from '../lib/download';
-import { cleanHeadings } from '../lib/headingCleanup';
+import { cleanHeadings, forEachHeading, changeHeadingLevels } from '../lib/headingCleanup';
 
 interface PreviewProps {
   job?: ConversionJob;
@@ -96,9 +96,16 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
   const [cleanedOverride, setCleanedOverride] = useState<string | null>(null);
   const [cleanStats, setCleanStats] = useState<{ headingsBefore: number; headingsAfter: number; linesRemoved: number } | null>(null);
   const [savingCleaned, setSavingCleaned] = useState(false);
+  // Heading-level editing state
+  const [selectedHeadings, setSelectedHeadings] = useState<Set<number>>(new Set());
+  const [lastSelectedIndex, setLastSelectedIndex] = useState<number | null>(null);
+  const [headingEditMode, setHeadingEditMode] = useState(false);
   useEffect(() => {
     setCleanedOverride(null);
     setCleanStats(null);
+    setHeadingEditMode(false);
+    setSelectedHeadings(new Set());
+    setLastSelectedIndex(null);
   }, [baseMd]);
 
   const md = cleanedOverride ?? baseMd;
@@ -120,28 +127,21 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
     [body],
   );
 
-  // Build document outline from body headings (skip code blocks)
+  // Build document outline from body headings using the shared iterator
+  // (guarantees index alignment with changeHeadingLevels).
   const outline = useMemo(() => {
     const items: { level: number; text: string; index: number }[] = [];
-    const lines = body.split('\n');
-    let inFence = false;
-    let i = 0;
-    for (const line of lines) {
-      if (/^```/.test(line.trim())) { inFence = !inFence; continue; }
-      if (inFence) continue;
-      const m = line.match(/^(#{1,6})\s+(.+?)\s*#*\s*$/);
-      if (m) {
-        // Strip basic inline markdown for the outline label
-        const label = m[2]
-          .replace(/`([^`]+)`/g, '$1')
-          .replace(/\*\*([^*]+)\*\*/g, '$1')
-          .replace(/\*([^*]+)\*/g, '$1')
-          .replace(/_([^_]+)_/g, '$1')
-          .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
-          .trim();
-        items.push({ level: m[1].length, text: label, index: i++ });
-      }
-    }
+    forEachHeading(body, (headingIndex, hashes, text) => {
+      // Strip basic inline markdown for the outline label
+      const label = text
+        .replace(/`([^`]+)`/g, '$1')
+        .replace(/\*\*([^*]+)\*\*/g, '$1')
+        .replace(/\*([^*]+)\*/g, '$1')
+        .replace(/_([^_]+)_/g, '$1')
+        .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+        .trim();
+      items.push({ level: hashes.length, text: label, index: headingIndex });
+    });
     return items;
   }, [body]);
 
@@ -231,18 +231,20 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
   // as an override. No persistence happens until the user clicks "Save".
   const headingCount = (s: string) => (s.match(/^#{1,6}\s+\S/gm) || []).length;
   function handleCleanHeadings() {
-    const cleaned = cleanHeadings(baseMd);
-    if (cleaned === baseMd) {
+    const source = cleanedOverride ?? baseMd;
+    const cleaned = cleanHeadings(source);
+    if (cleaned === source) {
       // Nothing changed — surface that visibly.
-      setCleanedOverride(baseMd);
-      setCleanStats({ headingsBefore: headingCount(baseMd), headingsAfter: headingCount(baseMd), linesRemoved: 0 });
+      setCleanedOverride(source);
+      setCleanStats({ headingsBefore: headingCount(source), headingsAfter: headingCount(source), linesRemoved: 0 });
       return;
     }
     setCleanedOverride(cleaned);
+    setHeadingEditMode(false);
     setCleanStats({
-      headingsBefore: headingCount(baseMd),
+      headingsBefore: headingCount(source),
       headingsAfter: headingCount(cleaned),
-      linesRemoved: baseMd.split('\n').length - cleaned.split('\n').length,
+      linesRemoved: source.split('\n').length - cleaned.split('\n').length,
     });
   }
 
@@ -260,7 +262,62 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
   function handleRevertCleaned() {
     setCleanedOverride(null);
     setCleanStats(null);
+    setHeadingEditMode(false);
+    setSelectedHeadings(new Set());
   }
+
+  // ── Heading-level editing (promote / demote from outline sidebar) ──────
+
+  function handleOutlineClick(index: number, e: React.MouseEvent) {
+    if (e.shiftKey && lastSelectedIndex !== null) {
+      // Range select
+      const start = Math.min(lastSelectedIndex, index);
+      const end = Math.max(lastSelectedIndex, index);
+      setSelectedHeadings(prev => {
+        const next = new Set(prev);
+        for (let i = start; i <= end; i++) next.add(i);
+        return next;
+      });
+    } else if (e.ctrlKey || e.metaKey) {
+      // Toggle select
+      setSelectedHeadings(prev => {
+        const next = new Set(prev);
+        if (next.has(index)) next.delete(index); else next.add(index);
+        return next;
+      });
+      setLastSelectedIndex(index);
+    } else {
+      // Plain click: navigate only, don't change selection
+      scrollToHeading(index);
+    }
+  }
+
+  function applyLevelChange(targetIndex: number, delta: number) {
+    // If the target is part of a multi-selection, apply to all selected;
+    // otherwise apply to just the target heading.
+    const indices = selectedHeadings.size > 0 && selectedHeadings.has(targetIndex)
+      ? selectedHeadings
+      : new Set([targetIndex]);
+
+    const changes = new Map<number, number>();
+    for (const idx of indices) {
+      const h = outline[idx];
+      if (!h) continue;
+      const newLevel = h.level + delta;
+      if (newLevel >= 1 && newLevel <= 6) {
+        changes.set(h.index, newLevel);
+      }
+    }
+    if (changes.size === 0) return;
+
+    const currentMd = cleanedOverride ?? baseMd;
+    setCleanedOverride(changeHeadingLevels(currentMd, changes));
+    setHeadingEditMode(true);
+    setCleanStats(null);
+  }
+
+  function handlePromote(index: number) { applyLevelChange(index, -1); }
+  function handleDemote(index: number) { applyLevelChange(index, +1); }
 
   // Scroll to a heading by its document-order index. Forces rendered tab and
   // loads enough chunks for the target heading to be in the DOM.
@@ -301,6 +358,44 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [findOpen]);
+
+  // Keyboard shortcuts for heading-level editing: Left = promote, Right = demote, Escape = deselect
+  useEffect(() => {
+    if (!outlineOpen || selectedHeadings.size === 0) return;
+    function handleHeadingKey(e: KeyboardEvent) {
+      // Don't intercept if user is typing in an input/textarea
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        const changes = new Map<number, number>();
+        for (const idx of selectedHeadings) {
+          const h = outline[idx];
+          if (h && h.level > 1) changes.set(h.index, h.level - 1);
+        }
+        if (changes.size > 0) {
+          setCleanedOverride(changeHeadingLevels(cleanedOverride ?? baseMd, changes));
+          setHeadingEditMode(true);
+          setCleanStats(null);
+        }
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        const changes = new Map<number, number>();
+        for (const idx of selectedHeadings) {
+          const h = outline[idx];
+          if (h && h.level < 6) changes.set(h.index, h.level + 1);
+        }
+        if (changes.size > 0) {
+          setCleanedOverride(changeHeadingLevels(cleanedOverride ?? baseMd, changes));
+          setHeadingEditMode(true);
+          setCleanStats(null);
+        }
+      } else if (e.key === 'Escape') {
+        setSelectedHeadings(new Set());
+      }
+    }
+    document.addEventListener('keydown', handleHeadingKey);
+    return () => document.removeEventListener('keydown', handleHeadingKey);
+  }, [outlineOpen, selectedHeadings, outline, cleanedOverride, baseMd]);
 
   // When find opens, force-load all chunks so TreeWalker can find everything
   useEffect(() => {
@@ -646,6 +741,42 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
         </div>
       )}
 
+      {/* Heading-level edit banner */}
+      {headingEditMode && !cleanStats && (
+        <div className="flex items-center gap-3 px-4 py-2 border-b border-p-accent/20 bg-p-accent/5 shrink-0">
+          <ListTree className="w-3.5 h-3.5 text-p-accent shrink-0" />
+          <span className="text-xs text-p-text">
+            Heading levels adjusted
+            {selectedHeadings.size > 0 && (
+              <span className="text-p-text-dim ml-1">
+                ({selectedHeadings.size} selected)
+              </span>
+            )}
+          </span>
+          <div className="ml-auto flex items-center gap-1.5">
+            {onSaveCleaned && cleanedOverride && cleanedOverride !== baseMd && (
+              <button
+                onClick={handleSaveCleaned}
+                className="btn-ghost"
+                disabled={savingCleaned}
+                title="Save heading level changes to disk"
+              >
+                {savingCleaned ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
+                {savingCleaned ? 'Saving...' : 'Save changes'}
+              </button>
+            )}
+            <button
+              onClick={handleRevertCleaned}
+              className="btn-ghost"
+              title="Discard all heading level changes"
+            >
+              <RotateCcw className="w-3 h-3" />
+              Revert
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Live preview banner */}
       {job?.status === 'converting' && md && (
         <div className="flex items-center gap-2 px-4 py-1.5 border-b border-p-accent/20 bg-p-accent/5 shrink-0">
@@ -684,15 +815,45 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
             ) : (
               <ul className="py-1">
                 {outline.map(h => (
-                  <li key={h.index}>
+                  <li key={h.index} className="group/item relative">
                     <button
-                      onClick={() => scrollToHeading(h.index)}
-                      className="w-full text-left py-1 pr-3 text-xs text-p-text hover:bg-p-surface-hover truncate tab-transition"
+                      onClick={(e) => {
+                        if (e.ctrlKey || e.metaKey || e.shiftKey) {
+                          handleOutlineClick(h.index, e);
+                        } else {
+                          scrollToHeading(h.index);
+                        }
+                      }}
+                      className={`w-full text-left py-1 pr-10 text-xs truncate tab-transition ${
+                        selectedHeadings.has(h.index)
+                          ? 'bg-p-accent/10 text-p-accent'
+                          : 'text-p-text hover:bg-p-surface-hover'
+                      }`}
                       style={{ paddingLeft: 12 + (h.level - 1) * 12 }}
-                      title={h.text}
+                      title={`${h.text} (H${h.level})`}
                     >
+                      <span className="text-p-text-dim text-[10px] mr-1 font-mono">H{h.level}</span>
                       {h.text}
                     </button>
+                    {/* Hover promote/demote buttons */}
+                    <div className="absolute right-1 top-1/2 -translate-y-1/2 hidden group-hover/item:flex items-center gap-0.5">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handlePromote(h.index); }}
+                        className="p-0.5 rounded text-p-text-dim hover:text-p-accent hover:bg-p-surface-hover tab-transition"
+                        title="Promote (decrease heading level)"
+                        disabled={h.level <= 1}
+                      >
+                        <ChevronLeft className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleDemote(h.index); }}
+                        className="p-0.5 rounded text-p-text-dim hover:text-p-accent hover:bg-p-surface-hover tab-transition"
+                        title="Demote (increase heading level)"
+                        disabled={h.level >= 6}
+                      >
+                        <ChevronRight className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   </li>
                 ))}
               </ul>
