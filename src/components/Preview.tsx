@@ -131,7 +131,21 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
   const [lastSelectedIndex, setLastSelectedIndex] = useState<number | null>(null);
   const [headingEditMode, setHeadingEditMode] = useState(false);
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  // Refs for values read inside the [baseMd] effect without adding them as deps
+  const headingEditModeRef = useRef(headingEditMode);
+  headingEditModeRef.current = headingEditMode;
+  const cleanedOverrideRef = useRef(cleanedOverride);
+  cleanedOverrideRef.current = cleanedOverride;
+
   useEffect(() => {
+    // When baseMd changes because our auto-save just landed (parent refreshed
+    // the prop to match what we saved), absorb the change without resetting
+    // edit mode or selection — the user is still editing.
+    if (headingEditModeRef.current && cleanedOverrideRef.current && baseMd === cleanedOverrideRef.current) {
+      setCleanedOverride(null);
+      setCleanStats(null);
+      return;
+    }
     setCleanedOverride(null);
     setCleanStats(null);
     setHeadingEditMode(false);

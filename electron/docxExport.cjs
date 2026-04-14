@@ -23,6 +23,10 @@ async function convertMarkdownToDocx(markdown) {
     }
   }
 
+  // ── Strip document outline section ───────────────────────────────────────
+  // Remove everything between <!-- Document Outline --> and the next ---
+  body = body.replace(/<!--\s*Document Outline\s*-->[\s\S]*?---\n?/, '');
+
   // ── Extract footnote definitions ─────────────────────────────────────────
   const footnoteMap = new Map();
   const fnDefRegex = /^\[\^(\w+)\]:\s*(.+)$/gm;
