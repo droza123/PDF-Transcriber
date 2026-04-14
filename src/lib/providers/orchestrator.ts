@@ -3,6 +3,10 @@ import { getActiveProvider } from './registry';
 import { getActiveModelPriority } from '../settings';
 
 export interface OrchestratorCallOptions {
+  /** Explicit provider to use (overrides active provider from settings). */
+  provider?: Provider;
+  /** Explicit model list to use (overrides active model priority from settings). */
+  models?: string[];
   onRetry?: (attempt: number, delaySec: number, reason?: string) => void;
   onModelSkip?: (skippedModel: string, nextModel: string | null, reason: string) => void;
   onModelStart?: (model: string) => void;
@@ -25,10 +29,10 @@ export async function callWithRetry(
   prompt: string,
   options: OrchestratorCallOptions = {},
 ): Promise<ProviderResult> {
-  const { onRetry, onModelSkip, onModelStart, onStreamProgress, onError, abortSignal, skipModels } = options;
-  const provider: Provider = getActiveProvider();
+  const { provider: explicitProvider, models: explicitModels, onRetry, onModelSkip, onModelStart, onStreamProgress, onError, abortSignal, skipModels } = options;
+  const provider: Provider = explicitProvider ?? getActiveProvider();
 
-  const allModels = getActiveModelPriority();
+  const allModels = explicitModels ?? getActiveModelPriority();
   const models = allModels.filter(m => !skipModels?.has(m));
 
   if (models.length === 0) {
@@ -169,10 +173,10 @@ export async function callTextWithRetry(
   prompt: string,
   options: OrchestratorCallOptions = {},
 ): Promise<ProviderResult> {
-  const { onRetry, onModelSkip, onModelStart, onStreamProgress, onError, abortSignal, skipModels } = options;
-  const provider: Provider = getActiveProvider();
+  const { provider: explicitProvider, models: explicitModels, onRetry, onModelSkip, onModelStart, onStreamProgress, onError, abortSignal, skipModels } = options;
+  const provider: Provider = explicitProvider ?? getActiveProvider();
 
-  const allModels = getActiveModelPriority();
+  const allModels = explicitModels ?? getActiveModelPriority();
   const models = allModels.filter(m => !skipModels?.has(m));
 
   if (models.length === 0) {

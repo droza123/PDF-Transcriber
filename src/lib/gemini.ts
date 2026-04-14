@@ -4,9 +4,9 @@
  * orchestration is in providers/orchestrator.ts.
  */
 import { callWithRetry, callTextWithRetry, type OrchestratorCallOptions } from './providers/orchestrator';
-import type { ProviderResult } from './providers/types';
+import type { Provider, ProviderResult } from './providers/types';
 import { getSettings } from './settings';
-import { getActiveProvider } from './providers/registry';
+import { getTranscribeProvider } from './providers/registry';
 
 // Re-export types for backward compat
 export type GeminiCallOptions = OrchestratorCallOptions;
@@ -119,9 +119,11 @@ export async function extractDocumentOutline(
   onModelStart?: (model: string) => void,
   onStreamProgress?: (phase: 'uploading' | 'processing' | 'streaming', charsReceived: number) => void,
   onError?: (model: string, reason: string, action: string) => void,
+  provider?: Provider,
+  models?: string[],
 ): Promise<ProviderResult> {
   return callWithRetry(pdfBlob, PRESCAN_PROMPT, {
-    onRetry, abortSignal, skipModels, onModelSkip, onModelStart, onStreamProgress, onError,
+    provider, models, onRetry, abortSignal, skipModels, onModelSkip, onModelStart, onStreamProgress, onError,
   });
 }
 
@@ -139,10 +141,12 @@ export async function convertPdfBatchToMarkdown(
   onModelStart?: (model: string) => void,
   onStreamProgress?: (phase: 'uploading' | 'processing' | 'streaming', charsReceived: number) => void,
   onError?: (model: string, reason: string, action: string) => void,
+  provider?: Provider,
+  models?: string[],
 ): Promise<ProviderResult> {
   const prompt = buildBatchPrompt(batchNum, totalBatches, outline, previousBatchHeadings);
   return callWithRetry(pdfBlob, prompt, {
-    onRetry, abortSignal, skipModels, onModelSkip, onModelStart, onStreamProgress, onError,
+    provider, models, onRetry, abortSignal, skipModels, onModelSkip, onModelStart, onStreamProgress, onError,
   });
 }
 
@@ -223,9 +227,9 @@ ${headingList}`;
 }
 
 /** Pause between batches to respect rate limits. */
-export function batchDelay(): Promise<void> {
-  const provider = getActiveProvider();
-  return new Promise(resolve => setTimeout(resolve, provider.batchDelayMs));
+export function batchDelay(provider?: Provider): Promise<void> {
+  const prov = provider ?? getTranscribeProvider();
+  return new Promise(resolve => setTimeout(resolve, prov.batchDelayMs));
 }
 
 // ── Markdown translation ────────────────────────────────────────────────────
@@ -300,6 +304,10 @@ ${chunk}`;
 }
 
 export interface TranslateMarkdownOptions {
+  /** Explicit provider for translation (overrides active). */
+  provider?: Provider;
+  /** Explicit model list for translation (overrides active). */
+  models?: string[];
   onProgress?: (update: { currentChunk: number; totalChunks: number; statusMessage: string }) => void;
   /** Called after each chunk completes, with all results so far. Use for persistence. */
   onChunkComplete?: (completedChunks: number, totalChunks: number, results: string[]) => void;
@@ -322,7 +330,7 @@ export async function translateMarkdown(
   targetLanguage: string,
   options: TranslateMarkdownOptions = {},
 ): Promise<string> {
-  const { onProgress, onChunkComplete, resumeFromChunk, resumeResults, onRetry, onModelSkip, onModelStart, onStreamProgress, onError, abortSignal, skipModels } = options;
+  const { provider, models, onProgress, onChunkComplete, resumeFromChunk, resumeResults, onRetry, onModelSkip, onModelStart, onStreamProgress, onError, abortSignal, skipModels } = options;
 
   const chunks = chunkMarkdown(markdown);
   const totalChunks = chunks.length;
@@ -344,9 +352,9 @@ export async function translateMarkdown(
 
     const prompt = buildTranslationPrompt(chunks[i], chunkNum, totalChunks, targetLanguage);
     const result = await callTextWithRetry(prompt, {
-      onRetry, onModelSkip, onStreamProgress, onError, abortSignal, skipModels,
-      onModelStart: (model) => {
-        onModelStart?.(model);
+      provider, models, onRetry, onModelSkip, onStreamProgress, onError, abortSignal, skipModels,
+      onModelStart: (mdl) => {
+        onModelStart?.(mdl);
         onProgress?.({ currentChunk: chunkNum, totalChunks, statusMessage: chunkStatusMsg });
       },
     });

@@ -22,9 +22,21 @@ export function getProvider(id: ProviderId): Provider {
   return p;
 }
 
+/** @deprecated Use getScanProvider / getTranscribeProvider / getTranslateProvider instead. */
 export function getActiveProvider(): Provider {
-  const { activeProvider } = getSettings();
-  return getProvider(activeProvider);
+  return getTranscribeProvider();
+}
+
+export function getScanProvider(): Provider {
+  return getProvider(getSettings().scanProvider);
+}
+
+export function getTranscribeProvider(): Provider {
+  return getProvider(getSettings().transcribeProvider);
+}
+
+export function getTranslateProvider(): Provider {
+  return getProvider(getSettings().translateProvider);
 }
 
 export function getAllProviders(): Provider[] {

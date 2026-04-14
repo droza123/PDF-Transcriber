@@ -97,7 +97,14 @@ export const CUSTOM_PRESETS: CustomPreset[] = [
 ];
 
 export interface AppSettings {
+  /** @deprecated Use scanProvider / transcribeProvider / translateProvider instead. */
   activeProvider: ProviderId;
+  /** Provider used for document structure scanning (prescan). */
+  scanProvider: ProviderId;
+  /** Provider used for PDF-to-markdown transcription. */
+  transcribeProvider: ProviderId;
+  /** Provider used for markdown translation. */
+  translateProvider: ProviderId;
   providerModelPriority: Record<ProviderId, string[]>;
   openrouterAutoFreeModels: boolean;
   batchSize: number;
@@ -128,6 +135,9 @@ const STORAGE_KEY = 'app_settings';
 
 const DEFAULTS: AppSettings = {
   activeProvider: 'gemini',
+  scanProvider: 'gemini',
+  transcribeProvider: 'gemini',
+  translateProvider: 'gemini',
   providerModelPriority: {
     gemini: [...DEFAULT_GEMINI_MODELS],
     anthropic: [...DEFAULT_ANTHROPIC_MODELS],
@@ -221,6 +231,13 @@ export function getSettings(): AppSettings {
       parsed.openrouterAutoFreeModels = true;
     }
 
+    // Migrate activeProvider → role-based providers
+    if ('activeProvider' in parsed && !('scanProvider' in parsed)) {
+      parsed.scanProvider = parsed.activeProvider;
+      parsed.transcribeProvider = parsed.activeProvider;
+      parsed.translateProvider = parsed.activeProvider;
+    }
+
     // Migration: add English and trim translation languages to new defaults
     if (parsed.translationLanguages && !parsed.translationLanguages.includes('English')) {
       parsed.translationLanguages = [...DEFAULT_TRANSLATION_LANGUAGES];
@@ -240,18 +257,44 @@ export function saveSettings(partial: Partial<AppSettings>): void {
   localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...current, ...partial }));
 }
 
-/** Return the model priority list for the active provider. */
+/** @deprecated Use role-specific getters instead. */
 export function getActiveModelPriority(): string[] {
-  const { activeProvider, providerModelPriority } = getSettings();
-  const priority = providerModelPriority[activeProvider];
-  if (priority && priority.length > 0) return priority;
-  return PROVIDER_DEFAULT_MODELS[activeProvider] || [];
+  return getTranscribeModelPriority();
 }
 
-/** Return the first (highest-priority) model name for the active provider. */
+/** @deprecated Use role-specific getters instead. */
 export function getPrimaryModel(): string {
-  const models = getActiveModelPriority();
-  return models[0] ?? '';
+  return getTranscribePrimaryModel();
+}
+
+// ── Role-based model priority getters ─────────────────────────────────────
+
+function modelPriorityFor(provider: ProviderId): string[] {
+  const { providerModelPriority } = getSettings();
+  const priority = providerModelPriority[provider];
+  if (priority && priority.length > 0) return priority;
+  return PROVIDER_DEFAULT_MODELS[provider] || [];
+}
+
+export function getScanModelPriority(): string[] {
+  return modelPriorityFor(getSettings().scanProvider);
+}
+export function getScanPrimaryModel(): string {
+  return getScanModelPriority()[0] ?? '';
+}
+
+export function getTranscribeModelPriority(): string[] {
+  return modelPriorityFor(getSettings().transcribeProvider);
+}
+export function getTranscribePrimaryModel(): string {
+  return getTranscribeModelPriority()[0] ?? '';
+}
+
+export function getTranslateModelPriority(): string[] {
+  return modelPriorityFor(getSettings().translateProvider);
+}
+export function getTranslatePrimaryModel(): string {
+  return getTranslateModelPriority()[0] ?? '';
 }
 
 /** Convenience alias kept for backward compat with convert.ts frontmatter. */

@@ -1,6 +1,6 @@
 import type { ConversionJob, PartialProgress } from '../types';
 import { getPdfPageCount, extractPdfPageRange } from './pdfUtils';
-import { getPrimaryModel, addSessionSkippedModel, getSettings } from './settings';
+import { addSessionSkippedModel, getSettings, getScanModelPriority, getTranscribeModelPriority } from './settings';
 import {
   getBatchSize,
   extractDocumentOutline,
@@ -9,7 +9,7 @@ import {
   extractTrailingHeadings,
 } from './gemini';
 import { cleanHeadings, flattenOutlineHeadings } from './headingCleanup';
-import { getActiveProvider } from './providers/registry';
+import { getScanProvider, getTranscribeProvider } from './providers/registry';
 
 type ProgressCallback = (update: Partial<ConversionJob>) => void;
 
@@ -100,8 +100,11 @@ function buildFrontmatter(fileName: string, totalPages: number): string {
     .replace(/\s+/g, ' ')
     .trim();
   const date = new Date().toISOString().split('T')[0];
-  const model = getPrimaryModel();
-  const provider = getSettings().activeProvider;
+  const { scanProvider, transcribeProvider } = getSettings();
+  const transcribeModels = getTranscribeModelPriority();
+  const provider = transcribeProvider;
+  const model = transcribeModels[0] ?? '';
+  const scanInfo = scanProvider !== transcribeProvider ? `\nscan_provider: "${scanProvider}"` : '';
   return `---
 title: "${title}"
 source_file: "${fileName}"
@@ -109,7 +112,7 @@ pages: ${totalPages}
 converted: "${date}"
 converter: "PDF Transcriber"
 provider: "${provider}"
-model: "${model}"
+model: "${model}"${scanInfo}
 ---`;
 }
 
@@ -147,19 +150,19 @@ export async function convertFile(options: ConvertFileOptions): Promise<string> 
   const arrayBuffer = await file.arrayBuffer();
   const totalPages = await getPdfPageCount(arrayBuffer);
 
-  // Detect provider capabilities for the primary model
-  const provider = getActiveProvider();
-  const primaryModel = getPrimaryModel();
-  const isOcrMode = !(provider.isPromptCapable?.(primaryModel) ?? true);
-  const effectiveBatchSize = provider.prefersFullDocument?.(primaryModel) ? totalPages : BATCH_SIZE;
+  // Detect provider capabilities for the transcription model
+  const scanProv = getScanProvider();
+  const transcribeProv = getTranscribeProvider();
+  const scanModels = getScanModelPriority();
+  const transcribeModels = getTranscribeModelPriority();
+  const transcribePrimary = transcribeModels[0] ?? '';
+  const isOcrMode = !(transcribeProv.isPromptCapable?.(transcribePrimary) ?? true);
+  const effectiveBatchSize = transcribeProv.prefersFullDocument?.(transcribePrimary) ? totalPages : BATCH_SIZE;
   const totalBatches = Math.ceil(totalPages / effectiveBatchSize);
 
   onProgress({ totalPages, totalBatches });
 
-  // For OCR models, temporarily skip them for the prescan so a chat model handles it
-  if (isOcrMode) skipModels.add(primaryModel);
-
-  // Pass 1: Extract document outline
+  // Pass 1: Extract document outline using the scan provider
   let outline: string;
   if (resumeFrom?.outline) {
     outline = resumeFrom.outline;
@@ -181,14 +184,13 @@ export async function convertFile(options: ConvertFileOptions): Promise<string> 
       onModelStart,
       onStreamProgress,
       onError,
+      scanProv,
+      scanModels,
     );
     outline = result.text;
     onProgress({ streamPhase: undefined, streamChars: 0, statusMessage: `Structure scan complete (${result.modelUsed})` });
     console.log(`[convert] Document outline extracted (${outline.length} chars)`);
   }
-
-  // Re-enable the OCR model for the actual conversion
-  if (isOcrMode) skipModels.delete(primaryModel);
 
   // Pass 2: Convert in batches
   onProgress({ phase: 'converting', progress: 0 });
@@ -240,6 +242,8 @@ export async function convertFile(options: ConvertFileOptions): Promise<string> 
       onModelStart,
       onStreamProgress,
       onError,
+      transcribeProv,
+      transcribeModels,
     );
     onProgress({ streamPhase: undefined, streamChars: 0 });
     const cleanedBatch = stripCodeFences(result.text);
@@ -272,7 +276,7 @@ export async function convertFile(options: ConvertFileOptions): Promise<string> 
     });
 
     if (end < totalPages) {
-      await batchDelay();
+      await batchDelay(transcribeProv);
     }
   }
 
