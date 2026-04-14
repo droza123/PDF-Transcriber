@@ -233,15 +233,12 @@ export class MistralProvider implements Provider {
         // includes them in both the markdown AND the separate fields — we want them only
         // in the fields so we can read page numbers without polluting the body)
         if (p.header) {
-          const headerLines = p.header.trim().split('\n').map(l => l.trim()).filter(Boolean);
-          for (const hl of headerLines) {
-            // Remove the header line from markdown (may appear at start of page)
+          for (const hl of p.header.trim().split('\n').map(l => l.trim()).filter(Boolean)) {
             md = md.replace(new RegExp('^' + hl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*\\n?', 'm'), '');
           }
         }
         if (p.footer) {
-          const footerLines = p.footer.trim().split('\n').map(l => l.trim()).filter(Boolean);
-          for (const fl of footerLines) {
+          for (const fl of p.footer.trim().split('\n').map(l => l.trim()).filter(Boolean)) {
             md = md.replace(new RegExp('^' + fl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*\\n?', 'm'), '');
           }
         }
@@ -258,19 +255,36 @@ export class MistralProvider implements Provider {
           }
         }
 
-        // Extract printed page number from header or footer
-        const printedPage = MistralProvider._extractPageNumber(p.header, p.footer);
+        // Extract printed page number from header or footer (inline to avoid any static method issues)
+        let printedPage: string | null = null;
+        for (const text of [p.footer, p.header]) {
+          if (!text) continue;
+          const trimmed = text.trim();
+          const m = trimmed.match(/(?:^|\s)(\d{1,4})(?:\s|$)/) ||
+                    trimmed.match(/(?:^|\s)([ivxlcdm]{1,8})(?:\s|$)/i);
+          if (m) {
+            const candidate = m[1].trim();
+            if (/^[ivxlcdm]+$/i.test(candidate)) {
+              if (/^m{0,3}(cm|cd|d?c{0,3})(xc|xl|l?x{0,3})(ix|iv|v?i{0,3})$/i.test(candidate) && candidate.length > 0) {
+                printedPage = candidate.toLowerCase();
+                break;
+              }
+            } else {
+              printedPage = candidate;
+              break;
+            }
+          }
+        }
+
         if (printedPage) {
           pageNumberCount++;
           return `<!-- page: ${printedPage} -->\n${md}`;
         }
-        // No printed page number found — omit the marker
         return md;
       })
       .join('\n\n');
 
-    console.log(`[mistral] OCR complete, received ${text.length} chars from ${pages.length} page(s), ${imageCount} image(s) embedded, ${pageNumberCount}/${pages.length} page number(s) extracted`);
-    // Surface page number extraction in the stream progress message
+    console.log(`[mistral] OCR complete: ${pages.length} pages, ${imageCount} images, ${pageNumberCount} page numbers`);
     onStreamProgress?.('streaming', text.length);
     onStreamProgress?.('streaming', text.length);
 
