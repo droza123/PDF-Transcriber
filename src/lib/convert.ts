@@ -7,7 +7,6 @@ import {
   convertPdfBatchToMarkdown,
   batchDelay,
   extractTrailingHeadings,
-  correctOcrHeadings,
 } from './gemini';
 import { cleanHeadings, flattenOutlineHeadings } from './headingCleanup';
 import { getActiveProvider } from './providers/registry';
@@ -52,11 +51,44 @@ function normalizeBlankLines(text: string): string {
   return text.replace(/\n{3,}/g, '\n\n');
 }
 
-/** Extract a heading-only outline from markdown (for OCR output that skips prescan). */
-function extractOutlineFromMarkdown(markdown: string): string {
-  return markdown.split('\n')
-    .filter(line => /^#{1,6}\s+\S/.test(line))
-    .join('\n');
+/**
+ * Remap heading levels in OCR markdown to match a prescan outline.
+ * Builds a map of normalized heading text → correct level from the outline,
+ * then replaces heading prefixes in the markdown.
+ */
+function remapHeadingsFromOutline(markdown: string, outline: string): string {
+  // Build heading text → level map from the prescan outline
+  const levelMap = new Map<string, number>();
+  for (const line of outline.split('\n')) {
+    const m = line.match(/^(#{1,6})\s+(.+)$/);
+    if (m) {
+      const key = normalizeHeadingText(m[2]);
+      if (!levelMap.has(key)) levelMap.set(key, m[1].length);
+    }
+  }
+
+  if (levelMap.size === 0) return markdown;
+
+  let remapped = 0;
+  const result = markdown.split('\n').map(line => {
+    const m = line.match(/^(#{1,6})\s+(.+)$/);
+    if (!m) return line;
+    const key = normalizeHeadingText(m[2]);
+    const correctLevel = levelMap.get(key);
+    if (correctLevel != null && correctLevel !== m[1].length) {
+      remapped++;
+      return '#'.repeat(correctLevel) + ' ' + m[2];
+    }
+    return line;
+  }).join('\n');
+
+  console.log(`[convert] Remapped ${remapped} heading level(s) from prescan outline`);
+  return result;
+}
+
+/** Normalize heading text for fuzzy matching (trim, collapse whitespace, lowercase). */
+function normalizeHeadingText(text: string): string {
+  return text.trim().replace(/\s+/g, ' ').toLowerCase();
 }
 
 /** Build YAML frontmatter from file metadata. */
@@ -118,18 +150,21 @@ export async function convertFile(options: ConvertFileOptions): Promise<string> 
   // Detect provider capabilities for the primary model
   const provider = getActiveProvider();
   const primaryModel = getPrimaryModel();
-  const needsPrescan = provider.isPromptCapable?.(primaryModel) ?? true;
+  const isOcrMode = !(provider.isPromptCapable?.(primaryModel) ?? true);
   const effectiveBatchSize = provider.prefersFullDocument?.(primaryModel) ? totalPages : BATCH_SIZE;
   const totalBatches = Math.ceil(totalPages / effectiveBatchSize);
 
   onProgress({ totalPages, totalBatches });
 
-  // Pass 1: Extract document outline (skip for OCR models — derived from output instead)
+  // For OCR models, temporarily skip them for the prescan so a chat model handles it
+  if (isOcrMode) skipModels.add(primaryModel);
+
+  // Pass 1: Extract document outline
   let outline: string;
   if (resumeFrom?.outline) {
     outline = resumeFrom.outline;
     onProgress({ statusMessage: 'Resuming from saved progress...' });
-  } else if (needsPrescan) {
+  } else {
     onProgress({ statusMessage: 'Scanning document structure...' });
     const fullPdfBlob = new Blob([arrayBuffer], { type: 'application/pdf' });
     const result = await extractDocumentOutline(
@@ -150,11 +185,10 @@ export async function convertFile(options: ConvertFileOptions): Promise<string> 
     outline = result.text;
     onProgress({ streamPhase: undefined, streamChars: 0, statusMessage: `Structure scan complete (${result.modelUsed})` });
     console.log(`[convert] Document outline extracted (${outline.length} chars)`);
-  } else {
-    // OCR models: outline will be derived from the conversion output
-    outline = '';
-    console.log(`[convert] Skipping prescan — outline will be derived from OCR output`);
   }
+
+  // Re-enable the OCR model for the actual conversion
+  if (isOcrMode) skipModels.delete(primaryModel);
 
   // Pass 2: Convert in batches
   onProgress({ phase: 'converting', progress: 0 });
@@ -242,25 +276,13 @@ export async function convertFile(options: ConvertFileOptions): Promise<string> 
     }
   }
 
-  // For OCR models that skipped the prescan, correct heading levels via a chat model
-  // and derive the outline from the corrected output
-  if (!outline) {
-    onProgress({ statusMessage: 'Correcting heading levels...' });
+  // For OCR output, remap heading levels to match the prescan outline
+  if (isOcrMode && outline) {
     const joined = results.join('\n\n');
-    const correction = await correctOcrHeadings(joined, {
-      abortSignal,
-      skipModels,
-      onModelSkip,
-      onModelStart,
-      onStreamProgress,
-      onError,
-    });
-    outline = correction.outline;
-    // Replace results with heading-corrected version
+    const remapped = remapHeadingsFromOutline(joined, outline);
     results.length = 0;
-    results.push(correction.correctedMarkdown);
-    onProgress({ streamPhase: undefined, streamChars: 0 });
-    console.log(`[convert] Headings corrected, outline has ${outline.split('\n').length} entries`);
+    results.push(remapped);
+    console.log(`[convert] OCR headings remapped to match prescan outline`);
   }
 
   // Assemble final output
