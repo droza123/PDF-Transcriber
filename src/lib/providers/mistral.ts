@@ -255,11 +255,11 @@ export class MistralProvider implements Provider {
           }
         }
 
-        // Extract printed page number from header or footer (inline to avoid any static method issues)
+        // Extract printed page number from header or footer
         let printedPage: string | null = null;
-        for (const text of [p.footer, p.header]) {
-          if (!text) continue;
-          const trimmed = text.trim();
+        for (const hfText of [p.footer, p.header]) {
+          if (!hfText) continue;
+          const trimmed = hfText.trim();
           const m = trimmed.match(/(?:^|\s)(\d{1,4})(?:\s|$)/) ||
                     trimmed.match(/(?:^|\s)([ivxlcdm]{1,8})(?:\s|$)/i);
           if (m) {
