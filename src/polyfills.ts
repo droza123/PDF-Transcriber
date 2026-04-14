@@ -1,8 +1,19 @@
 /**
- * Polyfills for newer Uint8Array methods used by pdfjs-dist v5.x.
- * These are part of the TC39 "Uint8Array to/from base64 and hex" proposal
- * and may not be available in older browsers or Electron versions.
+ * Polyfills for newer APIs used by pdfjs-dist v5.x that may not be
+ * available in older browsers or Electron versions.
  */
+
+// ── Map.prototype.getOrInsertComputed (TC39 Stage 2) ──────────────────────
+if (typeof Map.prototype.getOrInsertComputed !== 'function') {
+  Map.prototype.getOrInsertComputed = function <K, V>(key: K, callbackFn: (key: K) => V): V {
+    if (this.has(key)) return this.get(key)!;
+    const value = callbackFn(key);
+    this.set(key, value);
+    return value;
+  };
+}
+
+// ── Uint8Array to/from base64 and hex (TC39 proposal) ─────────────────────
 
 if (typeof Uint8Array.prototype.toHex !== 'function') {
   Uint8Array.prototype.toHex = function (): string {

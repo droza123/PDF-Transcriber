@@ -1,6 +1,10 @@
 import type { SerializedQueueEntry, HistoryEntry, PartialProgress, LogEntry } from './types';
 
 declare global {
+  interface Map<K, V> {
+    getOrInsertComputed(key: K, callbackFn: (key: K) => V): V;
+  }
+
   interface Uint8Array {
     toHex(): string;
     toBase64(): string;
