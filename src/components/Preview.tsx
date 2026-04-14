@@ -130,6 +130,7 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
   const [selectedHeadings, setSelectedHeadings] = useState<Set<number>>(new Set());
   const [lastSelectedIndex, setLastSelectedIndex] = useState<number | null>(null);
   const [headingEditMode, setHeadingEditMode] = useState(false);
+  const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => {
     setCleanedOverride(null);
     setCleanStats(null);
@@ -324,6 +325,15 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
     }
   }
 
+  // Debounced auto-save: persists heading-level changes 500ms after the last edit
+  function debouncedAutoSave(content: string) {
+    clearTimeout(autoSaveTimerRef.current);
+    if (!onSaveCleaned) return;
+    autoSaveTimerRef.current = setTimeout(() => {
+      onSaveCleaned(content);
+    }, 500);
+  }
+
   function applyLevelChange(targetIndex: number, delta: number) {
     // If the target is part of a multi-selection, apply to all selected;
     // otherwise apply to just the target heading.
@@ -343,9 +353,11 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
     if (changes.size === 0) return;
 
     const currentMd = cleanedOverride ?? baseMd;
-    setCleanedOverride(changeHeadingLevels(currentMd, changes));
+    const newMd = changeHeadingLevels(currentMd, changes);
+    setCleanedOverride(newMd);
     setHeadingEditMode(true);
     setCleanStats(null);
+    debouncedAutoSave(newMd);
   }
 
   function handlePromote(index: number) { applyLevelChange(index, -1); }
@@ -391,12 +403,13 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [findOpen]);
 
-  // Keyboard shortcuts for heading-level editing: Left = promote, Right = demote, Escape = deselect
+  // Keyboard shortcuts for heading-level editing:
+  //   Left/Right = promote/demote, Shift+Up/Down = extend selection, Escape = deselect
   useEffect(() => {
     if (!outlineOpen || selectedHeadings.size === 0) return;
     function handleHeadingKey(e: KeyboardEvent) {
-      // Don't intercept if user is typing in an input/textarea
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+
       if (e.key === 'ArrowLeft') {
         e.preventDefault();
         const changes = new Map<number, number>();
@@ -405,9 +418,11 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
           if (h && h.level > 1) changes.set(h.index, h.level - 1);
         }
         if (changes.size > 0) {
-          setCleanedOverride(changeHeadingLevels(cleanedOverride ?? baseMd, changes));
+          const newMd = changeHeadingLevels(cleanedOverride ?? baseMd, changes);
+          setCleanedOverride(newMd);
           setHeadingEditMode(true);
           setCleanStats(null);
+          debouncedAutoSave(newMd);
         }
       } else if (e.key === 'ArrowRight') {
         e.preventDefault();
@@ -417,9 +432,29 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
           if (h && h.level < 6) changes.set(h.index, h.level + 1);
         }
         if (changes.size > 0) {
-          setCleanedOverride(changeHeadingLevels(cleanedOverride ?? baseMd, changes));
+          const newMd = changeHeadingLevels(cleanedOverride ?? baseMd, changes);
+          setCleanedOverride(newMd);
           setHeadingEditMode(true);
           setCleanStats(null);
+          debouncedAutoSave(newMd);
+        }
+      } else if (e.shiftKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+        e.preventDefault();
+        // Extend selection up or down from the last-selected heading
+        const anchor = lastSelectedIndex ?? Math.min(...selectedHeadings);
+        const sorted = [...selectedHeadings].sort((a, b) => a - b);
+        if (e.key === 'ArrowUp') {
+          const topmost = sorted[0];
+          if (topmost > 0) {
+            setSelectedHeadings(prev => new Set([...prev, topmost - 1]));
+            setLastSelectedIndex(topmost - 1);
+          }
+        } else {
+          const bottommost = sorted[sorted.length - 1];
+          if (bottommost < outline.length - 1) {
+            setSelectedHeadings(prev => new Set([...prev, bottommost + 1]));
+            setLastSelectedIndex(bottommost + 1);
+          }
         }
       } else if (e.key === 'Escape') {
         setSelectedHeadings(new Set());
@@ -427,7 +462,7 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
     }
     document.addEventListener('keydown', handleHeadingKey);
     return () => document.removeEventListener('keydown', handleHeadingKey);
-  }, [outlineOpen, selectedHeadings, outline, cleanedOverride, baseMd]);
+  }, [outlineOpen, selectedHeadings, lastSelectedIndex, outline, cleanedOverride, baseMd]);
 
   // When find opens, force-load all chunks so TreeWalker can find everything
   useEffect(() => {
@@ -786,21 +821,16 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
             )}
           </span>
           <div className="ml-auto flex items-center gap-1.5">
-            {onSaveCleaned && cleanedOverride && cleanedOverride !== baseMd && (
-              <button
-                onClick={handleSaveCleaned}
-                className="btn-ghost"
-                disabled={savingCleaned}
-                title="Save heading level changes to disk"
-              >
-                {savingCleaned ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
-                {savingCleaned ? 'Saving...' : 'Save changes'}
-              </button>
+            {onSaveCleaned && (
+              <span className="text-xs text-p-text-dim flex items-center gap-1">
+                <Check className="w-3 h-3 text-p-success" />
+                Auto-saved
+              </span>
             )}
             <button
               onClick={handleRevertCleaned}
               className="btn-ghost"
-              title="Discard all heading level changes"
+              title="Revert all heading level changes"
             >
               <RotateCcw className="w-3 h-3" />
               Revert
