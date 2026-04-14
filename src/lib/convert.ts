@@ -317,6 +317,15 @@ export async function convertFile(options: ConvertFileOptions): Promise<string> 
     }
   }
 
+  // Report page number extraction for OCR mode
+  if (isOcrMode) {
+    const joined = results.join('\n\n');
+    const pageMarkers = (joined.match(/<!-- page: .+? -->/g) || []).length;
+    const pageMsg = `Page numbers: ${pageMarkers} of ${totalPages} pages have printed page markers`;
+    onProgress({ statusMessage: pageMsg });
+    console.log(`[convert] ${pageMsg}`);
+  }
+
   // For OCR output, use LLM to correct heading levels against the prescan outline
   if (isOcrMode && outline) {
     onProgress({ statusMessage: 'Correcting headings via LLM...' });

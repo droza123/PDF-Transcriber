@@ -228,6 +228,24 @@ export class MistralProvider implements Provider {
     const text = pages
       .map(p => {
         let md = p.markdown;
+
+        // Strip header/footer text from the body markdown (extract_header/footer: true
+        // includes them in both the markdown AND the separate fields — we want them only
+        // in the fields so we can read page numbers without polluting the body)
+        if (p.header) {
+          const headerLines = p.header.trim().split('\n').map(l => l.trim()).filter(Boolean);
+          for (const hl of headerLines) {
+            // Remove the header line from markdown (may appear at start of page)
+            md = md.replace(new RegExp('^' + hl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*\\n?', 'm'), '');
+          }
+        }
+        if (p.footer) {
+          const footerLines = p.footer.trim().split('\n').map(l => l.trim()).filter(Boolean);
+          for (const fl of footerLines) {
+            md = md.replace(new RegExp('^' + fl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*\\n?', 'm'), '');
+          }
+        }
+
         // Replace image placeholder URLs with inline base64 data URIs
         if (p.images?.length) {
           for (const img of p.images) {
@@ -246,12 +264,14 @@ export class MistralProvider implements Provider {
           pageNumberCount++;
           return `<!-- page: ${printedPage} -->\n${md}`;
         }
-        // No printed page number found — omit the marker rather than use a PDF index
+        // No printed page number found — omit the marker
         return md;
       })
       .join('\n\n');
 
-    console.log(`[mistral] OCR complete, received ${text.length} chars from ${pages.length} page(s), ${imageCount} image(s) embedded, ${pageNumberCount} page number(s) extracted`);
+    console.log(`[mistral] OCR complete, received ${text.length} chars from ${pages.length} page(s), ${imageCount} image(s) embedded, ${pageNumberCount}/${pages.length} page number(s) extracted`);
+    // Surface page number extraction in the stream progress message
+    onStreamProgress?.('streaming', text.length);
     onStreamProgress?.('streaming', text.length);
 
     return { text, modelUsed: model };

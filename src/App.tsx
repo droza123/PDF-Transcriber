@@ -427,6 +427,9 @@ export default function App() {
               if (update.statusMessage?.startsWith('Heading correction:') || update.statusMessage?.startsWith('Heading remap:')) {
                 addLogEntry(jobId, fileName, 'info', update.statusMessage);
               }
+              if (update.statusMessage?.startsWith('Page numbers:')) {
+                addLogEntry(jobId, fileName, 'info', update.statusMessage);
+              }
               if (update.errorDetail) {
                 addLogEntry(jobId, fileName, 'error', update.errorDetail);
               }
