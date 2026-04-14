@@ -1,5 +1,5 @@
 import { Sun, Moon, Settings2 } from 'lucide-react';
-import { hasApiKey, getApiKey } from '../lib/apiKey';
+import { hasApiKey } from '../lib/apiKey';
 import { getSettings } from '../lib/settings';
 import { getAllProviders } from '../lib/providers/registry';
 import appIcon from '../../build/icon.png';
@@ -12,11 +12,14 @@ interface HeaderProps {
 }
 
 export default function Header({ theme, keyPresent, onToggleTheme, onOpenSettings }: HeaderProps) {
-  const activeProvider = keyPresent
-    ? getAllProviders().find(p => p.id === getSettings().activeProvider)
-    : null;
-  const key = keyPresent ? getApiKey() : null;
-  const maskedKey = key ? '\u2022\u2022\u2022\u2022' + key.slice(-4) : null;
+  const settings = getSettings();
+  const allProviders = getAllProviders();
+  // Show unique provider names used across all roles
+  const roleIds = new Set([settings.scanProvider, settings.transcribeProvider, settings.translateProvider]);
+  const roleProviders = keyPresent
+    ? allProviders.filter(p => roleIds.has(p.id))
+    : [];
+  const providerLabel = roleProviders.map(p => p.displayName).join(' / ');
 
   return (
     <header className="flex items-center justify-between px-6 py-3.5 border-b border-p-border bg-p-bg/80 backdrop-blur-sm relative z-10">
@@ -33,15 +36,14 @@ export default function Header({ theme, keyPresent, onToggleTheme, onOpenSetting
       </div>
       <div className="flex items-center gap-1.5">
         {/* Provider status */}
-        {keyPresent && activeProvider ? (
+        {keyPresent && providerLabel ? (
           <button
             onClick={onOpenSettings}
             className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs border border-p-border hover:border-p-accent/40 bg-p-surface/50 tab-transition group"
             title="Change provider settings"
           >
             <span className="w-1.5 h-1.5 rounded-full bg-p-success shrink-0" />
-            <span className="text-p-text-muted group-hover:text-p-text font-medium tab-transition">{activeProvider.displayName}</span>
-            {maskedKey && <span className="font-mono text-p-text-dim text-[11px]">{maskedKey}</span>}
+            <span className="text-p-text-muted group-hover:text-p-text font-medium tab-transition">{providerLabel}</span>
           </button>
         ) : (
           <button

@@ -6,8 +6,8 @@ import { hasApiKey, getApiKey } from './lib/apiKey';
 import { convertFile } from './lib/convert';
 import { translateMarkdown } from './lib/gemini';
 import { canSaveToSource, runAutoExport, exportHistoryAsCsv, rememberBrowsedDir } from './lib/download';
-import { getSettings, saveSettings, addSessionSkippedModel } from './lib/settings';
-import { getProvider } from './lib/providers/registry';
+import { getSettings, saveSettings, addSessionSkippedModel, getTranslateModelPriority } from './lib/settings';
+import { getProvider, getTranslateProvider } from './lib/providers/registry';
 import type { ProviderId } from './lib/providers/types';
 import { OpenRouterProvider } from './lib/providers/openrouter';
 import Header from './components/Header';
@@ -167,7 +167,7 @@ export default function App() {
   useEffect(() => {
     async function autoRefreshOpenRouterModels() {
       const settings = getSettings();
-      if (settings.activeProvider !== 'openrouter') return;
+      if (settings.scanProvider !== 'openrouter' && settings.transcribeProvider !== 'openrouter' && settings.translateProvider !== 'openrouter') return;
       if (!settings.openrouterAutoFreeModels) return;
       const key = getApiKey('openrouter');
       if (!key) return;
@@ -339,6 +339,8 @@ export default function App() {
           }
 
           markdown = await translateMarkdown(nextJob.sourceMarkdown, nextJob.translationLanguage!, {
+            provider: getTranslateProvider(),
+            models: getTranslateModelPriority(),
             ...commonStreamOpts,
             resumeFromChunk: translateResumeChunk,
             resumeResults: translateResumeResults,
@@ -478,6 +480,8 @@ export default function App() {
 
             // Phase 2: Translate the transcription
             markdown = await translateMarkdown(transcription, nextJob.translationLanguage, {
+              provider: getTranslateProvider(),
+              models: getTranslateModelPriority(),
               ...commonStreamOpts,
               onProgress: ({ currentChunk, totalChunks, statusMessage }) => {
                 updateJob(jobId, { currentBatch: currentChunk, totalBatches: totalChunks, statusMessage, progress: Math.round((currentChunk / totalChunks) * 100) });

@@ -163,12 +163,19 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
   const [savingConfig, setSavingConfig] = useState(false);
   const [saveConfigName, setSaveConfigName] = useState('');
   const [customPdfMode, setCustomPdfMode] = useState<CustomPdfMode>('images');
+  // Role assignment
+  const [scanProvider, setScanProviderState] = useState<ProviderId>('gemini');
+  const [transcribeProvider, setTranscribeProviderState] = useState<ProviderId>('gemini');
+  const [translateProvider, setTranslateProviderState] = useState<ProviderId>('gemini');
 
   useEffect(() => {
     if (open) {
       setSettingsTab('provider');
       const s = getSettings();
-      const provider = initialProvider || s.activeProvider;
+      setScanProviderState(s.scanProvider || s.activeProvider);
+      setTranscribeProviderState(s.transcribeProvider || s.activeProvider);
+      setTranslateProviderState(s.translateProvider || s.activeProvider);
+      const provider = initialProvider || s.transcribeProvider || s.activeProvider;
       setSelectedProvider(provider);
       setModelPriority(s.providerModelPriority[provider] || []);
       setBatchSize(s.batchSize);
@@ -355,10 +362,10 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
   }
 
   function handleProviderChange(id: ProviderId) {
-    // Save current model priority for the old provider and switch active provider
+    // Save current model priority for the old provider (config tab only — no longer sets activeProvider)
     const settings = getSettings();
     const updatedPriority = { ...settings.providerModelPriority, [selectedProvider]: modelPriority };
-    saveSettings({ activeProvider: id, providerModelPriority: updatedPriority });
+    saveSettings({ providerModelPriority: updatedPriority });
 
     setSelectedProvider(id);
     const newPriority = updatedPriority[id] || PROVIDER_DEFAULT_MODELS[id] || [];
@@ -599,11 +606,15 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
               {getAllProviders().map(p => {
                 const isSelected = p.id === selectedProvider;
                 const keyConfigured = hasApiKey(p.id);
+                const roles: string[] = [];
+                if (p.id === scanProvider) roles.push('S');
+                if (p.id === transcribeProvider) roles.push('T');
+                if (p.id === translateProvider) roles.push('Tr');
                 return (
                   <button
                     key={p.id}
                     onClick={() => handleProviderChange(p.id)}
-                    className={`flex-1 px-3 py-2.5 text-xs rounded-lg border tab-transition ${
+                    className={`flex-1 px-3 py-2.5 text-xs rounded-lg border tab-transition relative ${
                       isSelected
                         ? 'border-p-accent bg-p-accent/8 text-p-accent font-medium shadow-[0_0_0_1px_var(--p-accent-glow)]'
                         : 'border-p-border bg-p-bg text-p-text-muted hover:text-p-text hover:border-p-accent/40'
@@ -613,9 +624,36 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
                     {keyConfigured && (
                       <span className="ml-1 text-p-success">&#x2713;</span>
                     )}
+                    {roles.length > 0 && (
+                      <span className="absolute -top-1.5 -right-1 text-[8px] font-bold text-p-accent bg-p-bg border border-p-accent/40 rounded px-0.5 leading-tight">
+                        {roles.join('·')}
+                      </span>
+                    )}
                   </button>
                 );
               })}
+            </div>
+
+            {/* Role assignment */}
+            <div className="flex gap-2 mb-3">
+              {([
+                ['scanProvider', 'Scan', scanProvider, (v: ProviderId) => { setScanProviderState(v); saveSettings({ scanProvider: v }); }],
+                ['transcribeProvider', 'Transcribe', transcribeProvider, (v: ProviderId) => { setTranscribeProviderState(v); saveSettings({ transcribeProvider: v }); }],
+                ['translateProvider', 'Translate', translateProvider, (v: ProviderId) => { setTranslateProviderState(v); saveSettings({ translateProvider: v }); }],
+              ] as [string, string, ProviderId, (v: ProviderId) => void][]).map(([key, label, value, onChange]) => (
+                <div key={key} className="flex-1">
+                  <label className="text-[10px] text-p-text-dim block mb-0.5">{label}</label>
+                  <select
+                    value={value}
+                    onChange={e => onChange(e.target.value as ProviderId)}
+                    className="w-full px-2 py-1 text-xs rounded-md bg-p-bg border border-p-border text-p-text focus:border-p-accent focus:outline-none"
+                  >
+                    {getAllProviders().filter(p => hasApiKey(p.id)).map(p => (
+                      <option key={p.id} value={p.id}>{p.displayName}</option>
+                    ))}
+                  </select>
+                </div>
+              ))}
             </div>
 
             {/* Provider description */}
