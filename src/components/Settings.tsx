@@ -3,7 +3,7 @@ import { X, GripVertical, RefreshCw, Info, Eye, EyeOff, Trash2, ExternalLink, Lo
 import { DndContext, closestCenter, type DragEndEvent } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { getSettings, saveSettings, initializeModelPriority, PROVIDER_DEFAULT_MODELS, DEFAULT_TRANSLATION_LANGUAGES, getSessionSkippedModels, CUSTOM_PRESETS, type ExportFormat, type FileNaming, type CustomConfig } from '../lib/settings';
+import { getSettings, saveSettings, initializeModelPriority, PROVIDER_DEFAULT_MODELS, DEFAULT_TRANSLATION_LANGUAGES, getSessionSkippedModels, CUSTOM_PRESETS, type ExportFormat, type FileNaming, type CustomConfig, type CustomPdfMode } from '../lib/settings';
 import { getCachedModels, getApiKey, setApiKey, clearApiKey, hasApiKey, validateAndFetchModels, getCustomConfigApiKey, setCustomConfigApiKey, clearCustomConfigApiKey } from '../lib/apiKey';
 import { getAllProviders, getProvider } from '../lib/providers/registry';
 import type { ProviderId, ProviderModel } from '../lib/providers/types';
@@ -162,6 +162,7 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
   const [customSavedConfigs, setCustomSavedConfigs] = useState<CustomConfig[]>([]);
   const [savingConfig, setSavingConfig] = useState(false);
   const [saveConfigName, setSaveConfigName] = useState('');
+  const [customPdfMode, setCustomPdfMode] = useState<CustomPdfMode>('images');
 
   useEffect(() => {
     if (open) {
@@ -191,6 +192,7 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
       setCustomSavedConfigs(s.customSavedConfigs || []);
       setSavingConfig(false);
       setSaveConfigName('');
+      setCustomPdfMode(s.customPdfMode || 'images');
       // Reset key editing state
       setEditingKey(false);
       setKeyValue('');
@@ -224,7 +226,10 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
 
   async function handleCustomConnect() {
     if (!customBaseUrl.trim()) return;
-    saveSettings({ customBaseUrl: customBaseUrl.trim() });
+    // Only persist the URL for manual mode — presets/saved configs store their own URLs
+    if (customActiveConfigId === 'manual') {
+      saveSettings({ customBaseUrl: customBaseUrl.trim() });
+    }
     setRefreshing(true);
     const provider = getProvider('custom');
     const key = getCustomConfigApiKey(customActiveConfigId) || '';
@@ -269,14 +274,15 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
       setCustomModels(models);
       setModelPriority(s.providerModelPriority.custom || []);
       setCustomConnected(models.length > 0);
+      setCustomPdfMode(s.customPdfMode || 'images');
     } else {
-      // Preset or saved config — load its base URL
+      // Preset or saved config — load its values into local state for display
+      // but do NOT write them into the manual config settings (customBaseUrl etc.)
+      // so that manual mode retains its own independent values.
       const preset = CUSTOM_PRESETS.find(p => p.id === configId);
       const saved = customSavedConfigs.find(c => c.id === configId);
-      const url = preset?.baseUrl || saved?.baseUrl || '';
-      setCustomBaseUrl(url);
-      // Save URL to settings so CustomProvider._getBaseUrl() can read it
-      saveSettings({ customBaseUrl: url });
+      setCustomBaseUrl(preset?.baseUrl || saved?.baseUrl || '');
+      setCustomPdfMode(preset?.pdfMode || saved?.pdfMode || 'images');
 
       if (saved) {
         setCustomModels(saved.models);
@@ -296,6 +302,20 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
     setValidationResult(null);
   }
 
+  function handlePdfModeChange(mode: CustomPdfMode) {
+    if (customActiveConfigId === 'manual') {
+      saveSettings({ customPdfMode: mode });
+    } else if (!CUSTOM_PRESETS.find(p => p.id === customActiveConfigId)) {
+      // Saved config — persist into its pdfMode field
+      const updated = customSavedConfigs.map(c =>
+        c.id === customActiveConfigId ? { ...c, pdfMode: mode } : c,
+      );
+      setCustomSavedConfigs(updated);
+      saveSettings({ customSavedConfigs: updated });
+    }
+    // For built-in presets: only local state changes (resets on config switch)
+  }
+
   function handleSaveConfig() {
     const name = saveConfigName.trim();
     if (!name) return;
@@ -305,6 +325,7 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
       name,
       baseUrl: customBaseUrl,
       models: [...customModels],
+      pdfMode: customPdfMode,
     };
 
     // Copy current API key to the new config's key slot
@@ -521,7 +542,7 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
       onClick={onClose}
     >
       <div
-        className="w-full max-w-lg max-h-[90vh] rounded-xl bg-p-bg border border-p-border shadow-2xl p-6 overflow-y-auto"
+        className="w-full max-w-2xl max-h-[90vh] rounded-xl bg-p-bg border border-p-border shadow-2xl p-6 overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-4">
@@ -770,6 +791,38 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
                     )}
                   </div>
                 )}
+
+                {/* PDF input mode */}
+                <div>
+                  <label className="section-label block mb-1">PDF input mode</label>
+                  <div className="flex gap-1.5">
+                    <button
+                      onClick={() => { setCustomPdfMode('images'); handlePdfModeChange('images'); }}
+                      className={`flex-1 px-2.5 py-1.5 text-xs rounded-lg border tab-transition ${
+                        customPdfMode === 'images'
+                          ? 'border-p-accent bg-p-accent/8 text-p-accent font-medium'
+                          : 'border-p-border bg-p-bg text-p-text-muted hover:text-p-text hover:border-p-accent/40'
+                      }`}
+                    >
+                      Page images
+                    </button>
+                    <button
+                      onClick={() => { setCustomPdfMode('pdf'); handlePdfModeChange('pdf'); }}
+                      className={`flex-1 px-2.5 py-1.5 text-xs rounded-lg border tab-transition ${
+                        customPdfMode === 'pdf'
+                          ? 'border-p-accent bg-p-accent/8 text-p-accent font-medium'
+                          : 'border-p-border bg-p-bg text-p-text-muted hover:text-p-text hover:border-p-accent/40'
+                      }`}
+                    >
+                      PDF document
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-p-text-dim/60 mt-1">
+                    {customPdfMode === 'images'
+                      ? 'Renders each page as an image. Works with most local servers (Ollama, LM Studio).'
+                      : 'Sends the PDF file directly. Use for cloud APIs that accept PDF input (Groq, etc.).'}
+                  </p>
+                </div>
               </div>
             )}
 

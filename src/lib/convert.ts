@@ -9,6 +9,7 @@ import {
   extractTrailingHeadings,
 } from './gemini';
 import { cleanHeadings, flattenOutlineHeadings } from './headingCleanup';
+import { getActiveProvider } from './providers/registry';
 
 type ProgressCallback = (update: Partial<ConversionJob>) => void;
 
@@ -48,6 +49,13 @@ function stripCodeFences(text: string): string {
 /** Collapse 3+ consecutive newlines to 2. */
 function normalizeBlankLines(text: string): string {
   return text.replace(/\n{3,}/g, '\n\n');
+}
+
+/** Extract a heading-only outline from markdown (for OCR output that skips prescan). */
+function extractOutlineFromMarkdown(markdown: string): string {
+  return markdown.split('\n')
+    .filter(line => /^#{1,6}\s+\S/.test(line))
+    .join('\n');
 }
 
 /** Build YAML frontmatter from file metadata. */
@@ -105,16 +113,22 @@ export async function convertFile(options: ConvertFileOptions): Promise<string> 
 
   const arrayBuffer = await file.arrayBuffer();
   const totalPages = await getPdfPageCount(arrayBuffer);
-  const totalBatches = Math.ceil(totalPages / BATCH_SIZE);
+
+  // Detect provider capabilities for the primary model
+  const provider = getActiveProvider();
+  const primaryModel = getPrimaryModel();
+  const needsPrescan = provider.isPromptCapable?.(primaryModel) ?? true;
+  const effectiveBatchSize = provider.prefersFullDocument?.(primaryModel) ? totalPages : BATCH_SIZE;
+  const totalBatches = Math.ceil(totalPages / effectiveBatchSize);
 
   onProgress({ totalPages, totalBatches });
 
-  // Pass 1: Extract document outline (skip if resuming)
+  // Pass 1: Extract document outline (skip for OCR models — derived from output instead)
   let outline: string;
   if (resumeFrom?.outline) {
     outline = resumeFrom.outline;
     onProgress({ statusMessage: 'Resuming from saved progress...' });
-  } else {
+  } else if (needsPrescan) {
     onProgress({ statusMessage: 'Scanning document structure...' });
     const fullPdfBlob = new Blob([arrayBuffer], { type: 'application/pdf' });
     const result = await extractDocumentOutline(
@@ -135,6 +149,10 @@ export async function convertFile(options: ConvertFileOptions): Promise<string> 
     outline = result.text;
     onProgress({ streamPhase: undefined, streamChars: 0, statusMessage: `Structure scan complete (${result.modelUsed})` });
     console.log(`[convert] Document outline extracted (${outline.length} chars)`);
+  } else {
+    // OCR models: outline will be derived from the conversion output
+    outline = '';
+    console.log(`[convert] Skipping prescan — outline will be derived from OCR output`);
   }
 
   // Pass 2: Convert in batches
@@ -150,11 +168,11 @@ export async function convertFile(options: ConvertFileOptions): Promise<string> 
     ? extractTrailingHeadings(results[results.length - 1], 5)
     : '';
 
-  for (let start = startBatch * BATCH_SIZE; start < totalPages; start += BATCH_SIZE) {
+  for (let start = startBatch * effectiveBatchSize; start < totalPages; start += effectiveBatchSize) {
     if (abortSignal?.aborted) throw new DOMException('Cancelled', 'AbortError');
 
-    const end = Math.min(start + BATCH_SIZE, totalPages);
-    const batchNum = Math.floor(start / BATCH_SIZE) + 1;
+    const end = Math.min(start + effectiveBatchSize, totalPages);
+    const batchNum = Math.floor(start / effectiveBatchSize) + 1;
 
     onProgress({
       currentBatch: batchNum,
@@ -162,7 +180,7 @@ export async function convertFile(options: ConvertFileOptions): Promise<string> 
     });
 
     let batchBlob: Blob;
-    if (totalPages <= BATCH_SIZE) {
+    if (totalPages <= effectiveBatchSize) {
       batchBlob = fullPdfBlob;
     } else {
       const batchBytes = await extractPdfPageRange(arrayBuffer, start, end);
@@ -208,8 +226,8 @@ export async function convertFile(options: ConvertFileOptions): Promise<string> 
     });
 
     // Update bar + text together so they stay in sync
-    const nextStart = start + BATCH_SIZE;
-    const nextEnd = Math.min(nextStart + BATCH_SIZE, totalPages);
+    const nextStart = start + effectiveBatchSize;
+    const nextEnd = Math.min(nextStart + effectiveBatchSize, totalPages);
     const nextBatch = batchNum + 1;
     onProgress({
       progress: Math.round((batchNum / totalBatches) * 100),
@@ -221,6 +239,12 @@ export async function convertFile(options: ConvertFileOptions): Promise<string> 
     if (end < totalPages) {
       await batchDelay();
     }
+  }
+
+  // For OCR models that skipped the prescan, derive the outline from conversion output
+  if (!outline) {
+    outline = extractOutlineFromMarkdown(results.join('\n\n'));
+    console.log(`[convert] Outline derived from OCR output (${outline.length} chars)`);
   }
 
   // Assemble final output

@@ -62,4 +62,9 @@ export interface Provider {
   /** Transient overload (HTTP 503 / "unavailable"). Service will recover — worth patient retries. */
   isOverloadedError(error: any): boolean;
   summarizeError(error: any): string;
+
+  /** Whether a given model can follow text prompts (false for pure-OCR models). */
+  isPromptCapable?(model: string): boolean;
+  /** Whether a given model works best with the full document rather than page-range batches. */
+  prefersFullDocument?(model: string): boolean;
 }

@@ -1,10 +1,14 @@
+import '../polyfills';
 import * as pdfjsLib from 'pdfjs-dist';
+// @ts-ignore — worker module has no type declarations
+import * as pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs';
 
-// Use the bundled worker
-pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-  'pdfjs-dist/build/pdf.worker.min.mjs',
-  import.meta.url,
-).toString();
+// Run pdfjs parsing on the main thread (via the built-in "fake worker")
+// instead of in a Web Worker.  Web Workers have their own global scope and
+// don't inherit our Uint8Array.toHex / toBase64 polyfills that pdfjs-dist v5
+// requires internally.  Importing the worker as a regular module keeps
+// everything on the main thread where the polyfills are active.
+(globalThis as any).pdfjsWorker = pdfjsWorker;
 
 /**
  * Convert all pages of a PDF blob into PNG data-URI strings.

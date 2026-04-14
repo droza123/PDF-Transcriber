@@ -1,4 +1,5 @@
 import type { Provider, ProviderCallOptions, ProviderModel, ProviderResult } from './types';
+import type { CustomPdfMode } from '../settings';
 import { getSettings, CUSTOM_PRESETS } from '../settings';
 import { pdfToImages } from '../pdfImages';
 
@@ -68,14 +69,21 @@ export class CustomProvider implements Provider {
   }
 
   async call(pdfBlob: Blob, options: ProviderCallOptions): Promise<ProviderResult> {
+    const pdfMode = this._getPdfMode();
+    if (pdfMode === 'pdf') {
+      return this._callWithPdf(pdfBlob, options);
+    }
+    return this._callWithImages(pdfBlob, options);
+  }
+
+  /** Send PDF pages as images (for local servers like Ollama / LM Studio). */
+  private async _callWithImages(pdfBlob: Blob, options: ProviderCallOptions): Promise<ProviderResult> {
     const { model, prompt, maxOutputTokens, abortSignal, onStreamProgress } = options;
     const key = this._getKeyOptional();
     const baseUrl = this._getBaseUrl();
 
     onStreamProgress?.('uploading', 0);
 
-    // Convert PDF pages to images since most local servers (Ollama, LM Studio)
-    // only support image_url content, not PDF file uploads
     const imageDataUrls = await pdfToImages(pdfBlob);
 
     if (abortSignal?.aborted) throw new DOMException('Cancelled', 'AbortError');
@@ -88,6 +96,60 @@ export class CustomProvider implements Provider {
         type: 'image_url',
         image_url: { url },
       })),
+      { type: 'text', text: prompt },
+    ];
+
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (key) headers['Authorization'] = `Bearer ${key}`;
+
+    const res = await fetch(`${baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        model,
+        max_tokens: maxOutputTokens,
+        stream: true,
+        messages: [{ role: 'user', content }],
+      }),
+      signal: abortSignal,
+    });
+
+    if (!res.ok) {
+      const errorData = await res.json().catch(() => ({}));
+      const error: any = new Error(errorData?.error?.message || `HTTP ${res.status}`);
+      error.status = res.status;
+      error.code = errorData?.error?.code;
+      throw error;
+    }
+
+    return this._readStream(res, abortSignal, onStreamProgress, model);
+  }
+
+  /** Send the PDF as a base64 document URL (for cloud APIs that accept PDFs directly). */
+  private async _callWithPdf(pdfBlob: Blob, options: ProviderCallOptions): Promise<ProviderResult> {
+    const { model, prompt, maxOutputTokens, abortSignal, onStreamProgress } = options;
+    const key = this._getKeyOptional();
+    const baseUrl = this._getBaseUrl();
+
+    onStreamProgress?.('uploading', 0);
+
+    const arrayBuffer = await pdfBlob.arrayBuffer();
+    const bytes = new Uint8Array(arrayBuffer);
+    let binary = '';
+    for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+    const base64 = btoa(binary);
+
+    if (abortSignal?.aborted) throw new DOMException('Cancelled', 'AbortError');
+
+    const sizeMB = (pdfBlob.size / 1024 / 1024).toFixed(1);
+    console.log(`[custom] Sending ${sizeMB} MB PDF directly to ${model} at ${baseUrl}`);
+    onStreamProgress?.('streaming', 0);
+
+    const content: any[] = [
+      {
+        type: 'image_url',
+        image_url: { url: `data:application/pdf;base64,${base64}` },
+      },
       { type: 'text', text: prompt },
     ];
 
@@ -187,6 +249,17 @@ export class CustomProvider implements Provider {
       return localStorage.getItem('provider_api_key_custom') || null;
     }
     return localStorage.getItem(`provider_api_key_custom_${customActiveConfigId}`) || null;
+  }
+
+  /** Resolve the effective PDF input mode for the active custom config. */
+  private _getPdfMode(): CustomPdfMode {
+    const { customActiveConfigId, customPdfMode, customSavedConfigs } = getSettings();
+    if (customActiveConfigId === 'manual') return customPdfMode;
+    const preset = CUSTOM_PRESETS.find(p => p.id === customActiveConfigId);
+    if (preset) return preset.pdfMode;
+    const saved = customSavedConfigs.find(c => c.id === customActiveConfigId);
+    if (saved?.pdfMode) return saved.pdfMode;
+    return 'images';
   }
 
   private _getFallbackModels(): ProviderModel[] {

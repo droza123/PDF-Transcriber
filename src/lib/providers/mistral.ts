@@ -113,6 +113,16 @@ export class MistralProvider implements Provider {
     return error?.message?.slice(0, 60) || 'unknown error';
   }
 
+  // ── Capability hints ──
+
+  isPromptCapable(model: string): boolean {
+    return !this._isOcrModel(model);
+  }
+
+  prefersFullDocument(model: string): boolean {
+    return this._isOcrModel(model);
+  }
+
   // ── Private helpers ──
 
   private _isOcrModel(model: string): boolean {
@@ -156,6 +166,9 @@ export class MistralProvider implements Provider {
           type: 'document_url',
           document_url: `data:application/pdf;base64,${base64}`,
         },
+        table_format: 'markdown',
+        extract_header: false,
+        extract_footer: false,
       }),
       signal: abortSignal,
     });
@@ -168,8 +181,10 @@ export class MistralProvider implements Provider {
     }
 
     const data = await res.json();
-    const pages: { markdown: string }[] = data.pages || [];
-    const text = pages.map(p => p.markdown).join('\n\n');
+    const pages: { index: number; markdown: string }[] = data.pages || [];
+    const text = pages
+      .map(p => `<!-- page: ${p.index + 1} -->\n${p.markdown}`)
+      .join('\n\n');
 
     console.log(`[mistral] OCR complete, received ${text.length} chars from ${pages.length} page(s)`);
     onStreamProgress?.('streaming', text.length);

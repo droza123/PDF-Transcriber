@@ -2,6 +2,8 @@ import type { ProviderId } from './providers/types';
 
 export type ExportFormat = 'md' | 'html' | 'json' | 'docx' | 'docx-logos';
 export type FileNaming = 'overwrite' | 'unique';
+/** How the Custom provider sends PDFs to the API. */
+export type CustomPdfMode = 'images' | 'pdf';
 
 export const DEFAULT_TRANSLATION_LANGUAGES = [
   'English', 'Spanish', 'French', 'German', 'Portuguese', 'Italian',
@@ -51,6 +53,8 @@ export interface CustomPreset {
   baseUrl: string;
   keyHelpUrl: string;
   keyHelpSteps: string[];
+  /** Default PDF input mode for this preset. */
+  pdfMode: CustomPdfMode;
 }
 
 /** A user-saved configuration for the Custom provider. */
@@ -59,6 +63,8 @@ export interface CustomConfig {
   name: string;
   baseUrl: string;
   models: string[];
+  /** How PDFs are sent — 'images' (page screenshots) or 'pdf' (base64 document). */
+  pdfMode?: CustomPdfMode;
 }
 
 export const CUSTOM_PRESETS: CustomPreset[] = [
@@ -73,6 +79,7 @@ export const CUSTOM_PRESETS: CustomPreset[] = [
       'Click "Get API Key" on any model page',
       'Copy the key and paste it above',
     ],
+    pdfMode: 'images',
   },
   {
     id: 'groq',
@@ -85,6 +92,7 @@ export const CUSTOM_PRESETS: CustomPreset[] = [
       'Go to API Keys',
       'Create a new key and paste it above',
     ],
+    pdfMode: 'images',
   },
 ];
 
@@ -106,6 +114,8 @@ export interface AppSettings {
   customModels: string[];
   customSavedConfigs: CustomConfig[];
   customActiveConfigId: string;
+  /** How the Custom provider sends PDFs — 'images' (page screenshots) or 'pdf' (base64 document). */
+  customPdfMode: CustomPdfMode;
   /**
    * Last folder a user picked through a Save As / Open dialog. Hidden — no UI
    * surface — used to seed the next dialog's defaultPath when the currently
@@ -141,6 +151,7 @@ const DEFAULTS: AppSettings = {
   customModels: [],
   customSavedConfigs: [],
   customActiveConfigId: 'manual',
+  customPdfMode: 'images',
   lastBrowsedDir: '',
 };
 
