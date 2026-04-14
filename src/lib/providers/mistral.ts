@@ -255,30 +255,47 @@ export class MistralProvider implements Provider {
           }
         }
 
-        // Extract printed page number from header or footer
-        let printedPage: string | null = null;
-        for (const hfText of [p.footer, p.header]) {
+        // Extract ALL printed page numbers from header and footer (two-page spreads have two)
+        const pageNums: string[] = [];
+        const isValidRoman = (s: string) =>
+          /^m{0,3}(cm|cd|d?c{0,3})(xc|xl|l?x{0,3})(ix|iv|v?i{0,3})$/i.test(s) && s.length > 0;
+        const romanToNum = (s: string) => {
+          const v: Record<string, number> = { i:1, v:5, x:10, l:50, c:100, d:500, m:1000 };
+          let n = 0; const lc = s.toLowerCase();
+          for (let j = 0; j < lc.length; j++) { const cur = v[lc[j]]||0, next = v[lc[j+1]]||0; n += cur < next ? -cur : cur; }
+          return n;
+        };
+
+        for (const hfText of [p.header, p.footer]) {
           if (!hfText) continue;
-          const trimmed = hfText.trim();
-          const m = trimmed.match(/(?:^|\s)(\d{1,4})(?:\s|$)/) ||
-                    trimmed.match(/(?:^|\s)([ivxlcdm]{1,8})(?:\s|$)/i);
-          if (m) {
-            const candidate = m[1].trim();
-            if (/^[ivxlcdm]+$/i.test(candidate)) {
-              if (/^m{0,3}(cm|cd|d?c{0,3})(xc|xl|l?x{0,3})(ix|iv|v?i{0,3})$/i.test(candidate) && candidate.length > 0) {
-                printedPage = candidate.toLowerCase();
-                break;
-              }
-            } else {
-              printedPage = candidate;
-              break;
+          // Find all isolated numbers (arabic or roman) in the header/footer text
+          const arabicMatches = [...hfText.matchAll(/(?:^|\s)(\d{1,4})(?:\s|$)/gm)];
+          for (const m of arabicMatches) {
+            const num = m[1].trim();
+            if (num && !pageNums.includes(num)) pageNums.push(num);
+          }
+          const romanMatches = [...hfText.matchAll(/(?:^|\s)([ivxlcdm]{1,8})(?:\s|$)/gi)];
+          for (const m of romanMatches) {
+            const candidate = m[1].trim().toLowerCase();
+            if (candidate && isValidRoman(candidate) && !pageNums.includes(candidate)) {
+              pageNums.push(candidate);
             }
           }
         }
 
-        if (printedPage) {
+        if (pageNums.length > 0) {
           pageNumberCount++;
-          return `<!-- page: ${printedPage} -->\n${md}`;
+          // Sort numerically (arabic or roman) and format as single or range
+          const isRoman = /^[ivxlcdm]+$/i.test(pageNums[0]);
+          if (isRoman) {
+            pageNums.sort((a, b) => romanToNum(a) - romanToNum(b));
+          } else {
+            pageNums.sort((a, b) => parseInt(a, 10) - parseInt(b, 10));
+          }
+          const pageLabel = pageNums.length === 1
+            ? pageNums[0]
+            : `${pageNums[0]}-${pageNums[pageNums.length - 1]}`;
+          return `<!-- page: ${pageLabel} -->\n${md}`;
         }
         return md;
       })
