@@ -87,13 +87,13 @@ function parseOutlineHeadings(outline: string): Map<string, number> {
  * Builds a map of normalized heading text → correct level from the outline,
  * then replaces heading prefixes in the markdown.
  */
-function remapHeadingsFromOutline(markdown: string, outline: string): string {
+function remapHeadingsFromOutline(markdown: string, outline: string): { text: string; remapped: number; outlineSize: number } {
   const levelMap = parseOutlineHeadings(outline);
 
-  if (levelMap.size === 0) return markdown;
+  if (levelMap.size === 0) return { text: markdown, remapped: 0, outlineSize: 0 };
 
   let remapped = 0;
-  const result = markdown.split('\n').map(line => {
+  const text = markdown.split('\n').map(line => {
     const m = line.match(/^(#{1,6})\s+(.+)$/);
     if (!m) return line;
     const key = normalizeHeadingText(m[2]);
@@ -105,8 +105,7 @@ function remapHeadingsFromOutline(markdown: string, outline: string): string {
     return line;
   }).join('\n');
 
-  console.log(`[convert] Remapped ${remapped} of ${levelMap.size} outline heading(s)`);
-  return result;
+  return { text, remapped, outlineSize: levelMap.size };
 }
 
 /**
@@ -320,10 +319,12 @@ export async function convertFile(options: ConvertFileOptions): Promise<string> 
   // For OCR output, remap heading levels to match the prescan outline
   if (isOcrMode && outline) {
     const joined = results.join('\n\n');
-    const remapped = remapHeadingsFromOutline(joined, outline);
+    const { text: remappedText, remapped: remapCount, outlineSize } = remapHeadingsFromOutline(joined, outline);
     results.length = 0;
-    results.push(remapped);
-    console.log(`[convert] OCR headings remapped to match prescan outline`);
+    results.push(remappedText);
+    const remapMsg = `Heading remap: ${remapCount} corrected (${outlineSize} outline entries)`;
+    onProgress({ statusMessage: remapMsg });
+    console.log(`[convert] ${remapMsg}`);
   }
 
   // Assemble final output
