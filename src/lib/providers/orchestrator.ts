@@ -104,19 +104,21 @@ export async function callWithRetry(
   }
 
   // ── Patience retries for transient overload (503) ───────────────────────
-  // If every failure so far was an overloaded error, the service is
-  // temporarily busy — keep retrying with longer delays instead of giving up.
+  // If the last failure was an overloaded error, the service is temporarily
+  // busy — keep retrying with longer delays instead of giving up. We check
+  // only the LAST failure (not all) because earlier models may have been
+  // skipped for rate-limiting, which is a separate concern.
   //   Phase 1: 10 attempts at 60s  (~10 min)
   //   Phase 2: 20 attempts at 180s (~60 min)
   //   Total:   30 attempts, ~70 min before final failure
-  const allOverloaded = failureLog.length > 0 && failureLog.every(f => f.overloaded);
-  if (allOverloaded) {
+  const lastWasOverloaded = failureLog.length > 0 && failureLog[failureLog.length - 1].overloaded;
+  if (lastWasOverloaded) {
     const PHASE_1_COUNT = 10;
     const PHASE_1_DELAY = 60;
     const PHASE_2_COUNT = 20;
     const PHASE_2_DELAY = 180;
     const MAX_PATIENCE = PHASE_1_COUNT + PHASE_2_COUNT;
-    console.log(`[${provider.id}] All failures were overload (503). Entering patience retry mode (up to ${MAX_PATIENCE} attempts).`);
+    console.log(`[${provider.id}] Last failure was overload (503). Entering patience retry mode (up to ${MAX_PATIENCE} attempts).`);
 
     for (let p = 0; p < MAX_PATIENCE; p++) {
       if (abortSignal?.aborted) throw new DOMException('Cancelled', 'AbortError');
@@ -236,9 +238,9 @@ export async function callTextWithRetry(
     }
   }
 
-  // Patience retries for transient overload (same schedule as callWithRetry)
-  const allOverloaded = failureLog.length > 0 && failureLog.every(f => f.overloaded);
-  if (allOverloaded) {
+  // Patience retries for transient overload (same logic as callWithRetry)
+  const lastWasOverloaded = failureLog.length > 0 && failureLog[failureLog.length - 1].overloaded;
+  if (lastWasOverloaded) {
     const PHASE_1_COUNT = 10;
     const PHASE_1_DELAY = 60;
     const PHASE_2_COUNT = 20;
