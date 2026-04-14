@@ -86,6 +86,10 @@ export async function callWithRetry(
         console.log(`[${provider.id}] Model ${model} added to skip list (${reason})`);
       } else if (attempt < maxAttempts) {
         onError?.(model, reason, `retrying with ${nextModelInRotation}`);
+      } else if (isOverloaded) {
+        // All normal attempts used up but this was an overload error —
+        // patience retries will likely follow, so don't say "no retries left".
+        onError?.(model, reason, 'service overloaded, switching to patient retry mode');
       } else {
         onError?.(model, reason, 'no retries left');
       }
@@ -102,16 +106,22 @@ export async function callWithRetry(
   // ── Patience retries for transient overload (503) ───────────────────────
   // If every failure so far was an overloaded error, the service is
   // temporarily busy — keep retrying with longer delays instead of giving up.
+  //   Phase 1: 10 attempts at 60s  (~10 min)
+  //   Phase 2: 20 attempts at 180s (~60 min)
+  //   Total:   30 attempts, ~70 min before final failure
   const allOverloaded = failureLog.length > 0 && failureLog.every(f => f.overloaded);
   if (allOverloaded) {
-    const MAX_PATIENCE = 10;
-    const PATIENCE_DELAYS = [30, 60, 60, 60, 60, 60, 60, 60, 60, 60]; // ~10 min total
-    console.log(`[${provider.id}] All failures were overload (503). Entering patience retry mode.`);
+    const PHASE_1_COUNT = 10;
+    const PHASE_1_DELAY = 60;
+    const PHASE_2_COUNT = 20;
+    const PHASE_2_DELAY = 180;
+    const MAX_PATIENCE = PHASE_1_COUNT + PHASE_2_COUNT;
+    console.log(`[${provider.id}] All failures were overload (503). Entering patience retry mode (up to ${MAX_PATIENCE} attempts).`);
 
     for (let p = 0; p < MAX_PATIENCE; p++) {
       if (abortSignal?.aborted) throw new DOMException('Cancelled', 'AbortError');
 
-      const delaySec = PATIENCE_DELAYS[p] ?? 60;
+      const delaySec = p < PHASE_1_COUNT ? PHASE_1_DELAY : PHASE_2_DELAY;
       const model = models[p % models.length];
       onRetry?.(maxAttempts + p + 1, delaySec, 'overloaded');
       console.log(`[${provider.id}] Patience retry ${p + 1}/${MAX_PATIENCE}: waiting ${delaySec}s then trying ${model}`);
@@ -134,10 +144,11 @@ export async function callWithRetry(
         const reason = provider.summarizeError(error);
         const stillOverloaded = provider.isOverloadedError(error);
         console.warn(`[${provider.id}] Patience retry ${p + 1} failed (${model}): ${reason}`);
-        onError?.(model, reason, stillOverloaded ? `still overloaded, will retry` : 'non-overload error, giving up');
+        onError?.(model, reason, stillOverloaded
+          ? `still overloaded, will retry (${p + 1}/${MAX_PATIENCE})`
+          : 'non-overload error, giving up');
 
         if (!stillOverloaded) {
-          // A different kind of error surfaced — fall through to the normal failure path.
           break;
         }
       }
@@ -211,6 +222,8 @@ export async function callTextWithRetry(
         onModelSkip?.(model, nextAvailable, reason);
       } else if (attempt < maxAttempts) {
         onError?.(model, reason, `retrying with ${nextModelInRotation}`);
+      } else if (isOverloaded) {
+        onError?.(model, reason, 'service overloaded, switching to patient retry mode');
       } else {
         onError?.(model, reason, 'no retries left');
       }
@@ -223,17 +236,20 @@ export async function callTextWithRetry(
     }
   }
 
-  // Patience retries for transient overload (same logic as callWithRetry)
+  // Patience retries for transient overload (same schedule as callWithRetry)
   const allOverloaded = failureLog.length > 0 && failureLog.every(f => f.overloaded);
   if (allOverloaded) {
-    const MAX_PATIENCE = 10;
-    const PATIENCE_DELAYS = [30, 60, 60, 60, 60, 60, 60, 60, 60, 60];
-    console.log(`[${provider.id}] All text failures were overload. Entering patience retry mode.`);
+    const PHASE_1_COUNT = 10;
+    const PHASE_1_DELAY = 60;
+    const PHASE_2_COUNT = 20;
+    const PHASE_2_DELAY = 180;
+    const MAX_PATIENCE = PHASE_1_COUNT + PHASE_2_COUNT;
+    console.log(`[${provider.id}] All text failures were overload. Entering patience retry mode (up to ${MAX_PATIENCE} attempts).`);
 
     for (let p = 0; p < MAX_PATIENCE; p++) {
       if (abortSignal?.aborted) throw new DOMException('Cancelled', 'AbortError');
 
-      const delaySec = PATIENCE_DELAYS[p] ?? 60;
+      const delaySec = p < PHASE_1_COUNT ? PHASE_1_DELAY : PHASE_2_DELAY;
       const model = models[p % models.length];
       onRetry?.(maxAttempts + p + 1, delaySec, 'overloaded');
       await new Promise(resolve => setTimeout(resolve, delaySec * 1000));
@@ -253,7 +269,9 @@ export async function callTextWithRetry(
         if (error.name === 'AbortError') throw error;
         const reason = provider.summarizeError(error);
         const stillOverloaded = provider.isOverloadedError(error);
-        onError?.(model, reason, stillOverloaded ? `still overloaded, will retry` : 'non-overload error, giving up');
+        onError?.(model, reason, stillOverloaded
+          ? `still overloaded, will retry (${p + 1}/${MAX_PATIENCE})`
+          : 'non-overload error, giving up');
         if (!stillOverloaded) break;
       }
     }
