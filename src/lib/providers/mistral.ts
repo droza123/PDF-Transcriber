@@ -191,11 +191,11 @@ export class MistralProvider implements Provider {
         // Replace image placeholder URLs with inline base64 data URIs
         if (p.images?.length) {
           for (const img of p.images) {
-            if (!img.image_base64 || !img.id) continue;
-            // Detect MIME from id extension, default to jpeg
-            const ext = img.id.split('.').pop()?.toLowerCase() || 'jpeg';
-            const mime = ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg';
-            const dataUri = `data:${mime};base64,${img.image_base64}`;
+            if (!img.id || !img.image_base64) continue;
+            // The API may return a raw base64 string or a full data URI — handle both
+            const dataUri = img.image_base64.startsWith('data:')
+              ? img.image_base64
+              : `data:image/jpeg;base64,${img.image_base64}`;
             // OCR markdown uses ![id](id) as placeholder — replace the URL part
             md = md.replaceAll(`](${img.id})`, `](${dataUri})`);
             imageCount++;
