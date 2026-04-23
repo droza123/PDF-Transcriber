@@ -1,0 +1,16 @@
+workflows:
+  mac-build:
+    name: PDF Transcriber Mac Build
+    instance_type: mac_mini_m2
+    max_build_duration: 30
+    environment:
+      node: 20
+    scripts:
+      - name: Install dependencies
+        script: npm ci
+      - name: Build app
+        script: npx vite build
+      - name: Package DMG
+        script: npx electron-builder --mac --publish never
+    artifacts:
+      - release/*.dmg
