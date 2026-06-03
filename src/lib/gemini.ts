@@ -36,6 +36,11 @@ Source of truth:
 - Verify the TOC against headings visible in the body; if they disagree, trust the body's actual typography (larger/bolder = higher level).
 - For scholarly commentaries (Bible, classical texts, law), expect deep nesting: a chapter may contain several numbered sections, each with lettered subsections, each with numbered sub-points. Capture this faithfully — do not flatten.
 
+Report only the structure that genuinely exists — never invent it:
+- Include a heading ONLY for a division that is actually marked in the document: an entry in a printed Table of Contents, or a title set off by distinct typography (larger/bolder type, its own line with surrounding space) or explicit numbering/labels (e.g. "Chapter 3", "1.1", "§2", "Part Two").
+- Do NOT derive a hierarchy from the document's topics, themes, or paragraph breaks. Topic shifts within continuous prose are NOT headings.
+- If the document has no printed Table of Contents and no visually-distinct section titles — whether it is continuous prose (a letter, essay, article, or narrative) or other unstructured content (a poem, a list, a form, or a single block of text) — it has no explicit structure. In that case, state plainly that the document has no explicit structural divisions and return an empty (or minimal) table of contents. Reporting "no structure" is the correct, expected answer for such documents — do not manufacture sections to fill the outline.
+
 Output ONLY the outline — no content, no commentary.`;
 
 function buildBatchPrompt(
@@ -67,29 +72,37 @@ ${outline}${prevBlock}
 Page numbering:
 - Look for printed page numbers on each page of this PDF.
 - If page numbers are visible, place <!-- page: N --> at the start of each page's content, where N is the ACTUAL printed page number from the document (which may be roman numerals like "iv", or start at any number — use exactly what's printed).
-- If no page numbers are visible on any page, do NOT insert page markers. Instead, ensure proper heading hierarchy so the document is navigable by section.
+- Place each <!-- page: N --> marker on its own line. When a page break falls in the middle of a paragraph, insert the marker at the exact point where the new page begins and continue the paragraph immediately after it — do NOT slide the marker to the nearest paragraph break, as that misattributes text to the wrong page.
+- If no page numbers are visible on any page, do NOT insert page markers. Rely on the document's genuine heading hierarchy for navigation where it has one; if the document has no explicit structure, transcribe it as-is (see Structural fidelity below) and do NOT add headings to compensate for the missing page numbers.
 
 Layout awareness:
 - Some PDFs contain scanned two-page spreads (two document pages side by side on a single PDF page). When you detect this, read LEFT page first, then RIGHT page. Do not interleave or duplicate content across the two pages. Each document page should appear exactly once in the output.
+- For pages laid out in multiple columns, read each column in full in reading order (the entire left column top-to-bottom, then the right) — do not read across columns or interleave their lines.
 
-Running headers / page headers:
-- PDFs typically have a running header at the top (and/or bottom) of each page — a shortened book title, chapter name, author surname, or section title repeated on every page. These are visual navigation aids, NOT structural headings.
-- Do NOT emit running headers as Markdown headings. You can recognize them by repetition: if the same short line appears at the top of many consecutive pages, it is a running header — omit it entirely.
+Running headers / footers:
+- PDFs typically have a running header at the top and/or a running footer at the bottom of each page — a shortened book title, chapter name, author surname, section title, or page number repeated on every page. These are visual navigation aids, NOT structural headings or body content.
+- Do NOT emit running headers or footers as Markdown headings or as body text. Recognize them by repetition: if the same short line appears at the top, or the same short line or page number appears at the bottom, across many consecutive pages, it is a running element — omit it entirely. (Exception: a printed page number in the header or footer should still be captured in the <!-- page: N --> marker per Page numbering above; only the repeated title/label text is dropped.)
 - Only emit a heading when it is a genuine, one-time section title in the flow of the text (typically typeset larger, bolder, or on its own line with spacing around it).
 
+Structural fidelity:
+- Reproduce only the structure that genuinely exists in the source. Emit a Markdown heading ONLY for a real section title — one set off by distinct typography (larger/bolder type, its own line) or explicit numbering/labels (e.g. "Chapter 3", "1.1", "§2", "Part Two") — and matched to the outline above.
+- Do NOT invent headings to organize the content by topic or paragraph. A shift in subject within continuous prose is not a heading.
+- If the outline indicates the document has little or no explicit structure (e.g. a letter, an essay, an article, an unbroken narrative, a poem, a list, or a form), transcribe the content exactly as it appears — preserving its original form and order, whatever that is (running paragraphs, verse lines, list items, dialogue, tabular data, or a single block of text) — and emit NO headings. Producing zero headings is the correct outcome for an unstructured document: render the document as it is and do not add structure the source lacks.
+
 Content rules:
-1. Use the heading hierarchy from the outline above to determine correct heading levels (# ## ### etc.). Match headings to the outline — do not guess levels independently.
+1. Use the heading hierarchy from the outline above to determine correct heading levels (# ## ### etc.). Match headings to the outline — do not guess levels independently. If the outline is empty or indicates no structure, follow the Structural fidelity guidance above and emit no headings.
 2. If the document has a table of contents, render its entries as plain text — not as headings. Only use heading syntax for actual chapter/section titles in the body.
 3. Preserve paragraph structure with blank lines between paragraphs.
 4. Convert tables to Markdown table syntax.
-5. Preserve footnotes using [^N] syntax with definitions at section end.
+5. Preserve footnotes using [^N] syntax. Use the footnote's ACTUAL printed number as the label — a note printed as "33" becomes [^33], not [^1] — and do NOT renumber from 1. Keep each definition at the end of the section (or batch) in which its note appears, written as [^33]: ....
 6. Preserve endnotes and bibliographic references EXACTLY as written.
-7. Describe figures/images in [brackets], e.g. [Figure 3: Bar chart of enrollment].
-8. Fix hyphenation artifacts from PDF line-breaking.
-9. Preserve block quotes using > syntax.
-10. Preserve numbered and bulleted lists exactly.
-11. Do not add commentary — output only document content as Markdown.
-12. Never duplicate content — each passage of text should appear exactly once.${extra}`;
+7. Transcribe passages in non-Latin scripts (Greek, Hebrew, Syriac, etc.) and other original-language quotations exactly as printed — do not transliterate, translate, or normalize them.
+8. Describe figures/images in [brackets], e.g. [Figure 3: Bar chart of enrollment].
+9. Fix hyphenation artifacts from PDF line-breaking.
+10. Preserve block quotes using > syntax.
+11. Preserve numbered and bulleted lists exactly.
+12. Do not add commentary — output only document content as Markdown.
+13. Never duplicate content — each passage of text should appear exactly once.${extra}`;
 }
 
 /**
@@ -289,7 +302,8 @@ Rules:
 - Subsections → level 4, sub-subsections → level 5, etc.
 - "CHAPTER N" markers, "ZOOM OUT" headers, "Question:", "Our answer:", "Questions:", "Our answers:" → demote
 - Figure captions → demote
-- If a heading doesn't appear in the outline but clearly belongs to a section, infer its level from context.
+- If the STRUCTURAL OUTLINE reports that the document has no explicit structure (it is empty/minimal, or describes unstructured content such as a letter, essay, article, narrative, poem, list, or form), the document genuinely has no sections: "demote" every OCR heading that is not an unmistakable, source-marked section title. The OCR model guessed those headings from visual appearance — do NOT keep or infer headings to impose structure the source lacks.
+- Otherwise (the outline describes a real structure): if an OCR heading is not listed in the outline but is clearly a genuine section title, infer its level from context.
 - Output ONLY the pipe-delimited lines, no other text.`;
 
   try {

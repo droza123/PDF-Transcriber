@@ -5,6 +5,7 @@ import { Copy, Check, Download, FolderOpen, Hash, Table2, BookOpen, Footprints, 
 import type { ConversionJob } from '../types';
 import { downloadMarkdown, showInFolder, exportAsHtml, exportAsJson, exportAsDocx } from '../lib/download';
 import { cleanHeadings, forEachHeading, changeHeadingLevels } from '../lib/headingCleanup';
+import { footnoteComponents } from '../lib/markdownFootnotes';
 
 interface PreviewProps {
   job?: ConversionJob;
@@ -65,6 +66,8 @@ const MarkdownChunk = memo(function MarkdownChunk({ content, startHeadingIndex }
         h4: heading(4),
         h5: heading(5),
         h6: heading(6),
+        // Make footnote refs/definitions show the original printed numbers.
+        ...footnoteComponents,
       }}
     >
       {content}

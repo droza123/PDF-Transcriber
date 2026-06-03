@@ -9,7 +9,7 @@ import {
   extractTrailingHeadings,
   correctOcrHeadingsWithLlm,
 } from './gemini';
-import { cleanHeadings, flattenOutlineHeadings } from './headingCleanup';
+import { cleanHeadings } from './headingCleanup';
 import { getScanProvider, getTranscribeProvider } from './providers/registry';
 
 type ProgressCallback = (update: Partial<ConversionJob>) => void;
@@ -151,6 +151,61 @@ converter: "PDF Transcriber"
 provider: "${provider}"
 model: "${model}"${scanInfo}
 ---`;
+}
+
+/** Escape a string for literal use inside a RegExp. */
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Ensure footnote definition labels are unique across batches. The transcribe
+ * prompt preserves each note's printed number as its [^N] label; if a document
+ * restarts footnote numbering partway through, two batches can each define [^1]
+ * — invalid Markdown that silently drops a note. For any label already defined
+ * in an earlier batch, rename every occurrence (reference AND definition) in the
+ * later batch to a unique, \w-safe variant (`1` → `1_2`), since the DOCX
+ * exporters parse footnote labels with \w+. Returns the (possibly modified)
+ * batches and the number of labels renamed. No-op when labels are already unique
+ * (continuous or gapped-but-unique numbering).
+ */
+function dedupeFootnoteLabels(batches: string[]): { results: string[]; renamed: number } {
+  const used = new Set<string>();
+  let renamed = 0;
+
+  const out = batches.map(batch => {
+    // Labels DEFINED in this batch (definition lines `[^label]: ...`), in order.
+    const defs: string[] = [];
+    const defRe = /^\[\^([^\]]+)\]:/gm;
+    let m: RegExpExecArray | null;
+    while ((m = defRe.exec(batch)) !== null) {
+      if (!defs.includes(m[1])) defs.push(m[1]);
+    }
+
+    let text = batch;
+    for (const label of defs) {
+      if (!used.has(label)) {
+        used.add(label);
+        continue;
+      }
+      // Collision with an earlier batch — find a unique \w-safe replacement.
+      let n = 2;
+      let next = `${label}_${n}`;
+      while (used.has(next) || defs.includes(next)) {
+        n++;
+        next = `${label}_${n}`;
+      }
+      // Replace both `[^label]` references and `[^label]:` definitions. The token
+      // is delimited by `[^` and `]`, so an exact-label match never catches a
+      // longer label (e.g. `[^1]` does not match inside `[^12]`).
+      text = text.replace(new RegExp(`\\[\\^${escapeRegExp(label)}\\]`, 'g'), `[^${next}]`);
+      used.add(next);
+      renamed++;
+    }
+    return text;
+  });
+
+  return { results: out, renamed };
 }
 
 /** Convert a single PDF file to Markdown, with optional resume and cancel support. */
@@ -317,6 +372,20 @@ export async function convertFile(options: ConvertFileOptions): Promise<string> 
     }
   }
 
+  // C — guard against duplicate footnote labels across batches. The transcribe
+  // prompt preserves each note's printed number as its [^N] label; if the
+  // document restarts footnote numbering partway through, two batches can each
+  // define [^1], which is invalid Markdown (and silently drops a note). Rename
+  // later collisions to a unique \w-safe label. No-op when labels are already
+  // unique (the common case, including gapped-but-unique numbering).
+  const { results: dedupedFn, renamed: fnRenamed } = dedupeFootnoteLabels(results);
+  if (fnRenamed > 0) {
+    results.length = 0;
+    results.push(...dedupedFn);
+    onProgress({ statusMessage: `Footnote labels: ${fnRenamed} duplicate(s) disambiguated` });
+    console.log(`[convert] Footnote dedupe: ${fnRenamed} duplicate label(s) renamed across batches`);
+  }
+
   // Report page number extraction for OCR mode
   if (isOcrMode) {
     const joined = results.join('\n\n');
@@ -350,22 +419,13 @@ export async function convertFile(options: ConvertFileOptions): Promise<string> 
   // Assemble final output
   let body = normalizeBlankLines(results.join('\n\n'));
   // Heading-quality post-processing (duplicates, TOC artifacts, markdown glitches).
-  // Applied to body only — the outline TOC block below is prescan output and
-  // must not be deduped against body headings.
   if (getSettings().headingCleanupEnabled) {
     body = cleanHeadings(body);
   }
   const frontmatter = buildFrontmatter(file.name, totalPages);
 
-  // Include outline as a navigable TOC after frontmatter
-  const toc = `\n\n<!-- Document Outline -->\n\n${stripCodeFences(outline)}\n\n---\n`;
-
-  let assembled = `${frontmatter}${toc}\n${body}`;
-  // Flatten heading-shaped TOC entries inside the outline block to bullets,
-  // so the navigable outline doesn't pollute heading counts / outline sidebar.
-  // Done last so the body-only cleanup above isn't confused by outline headings.
-  if (getSettings().headingCleanupEnabled) {
-    assembled = flattenOutlineHeadings(assembled);
-  }
-  return assembled;
+  // The prescan `outline` is used internally to set heading levels (batch prompt
+  // + OCR heading correction). It is intentionally NOT embedded in the output —
+  // a navigable outline is provided by the Preview sidebar instead.
+  return `${frontmatter}\n\n${body}`;
 }
