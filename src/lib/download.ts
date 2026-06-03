@@ -67,6 +67,7 @@ async function renderMarkdownToHtml(markdown: string, title: string): Promise<st
   const ReactMarkdown = (await import('react-markdown')).default;
   const remarkGfm = (await import('remark-gfm')).default;
   const rehypeRaw = (await import('rehype-raw').catch(() => ({ default: undefined }))).default;
+  const { footnoteComponents } = await import('./markdownFootnotes');
 
   const { frontmatterHtml, body } = preprocessMarkdown(markdown);
 
@@ -74,7 +75,7 @@ async function renderMarkdownToHtml(markdown: string, title: string): Promise<st
   const rehypePlugins: any[] = rehypeRaw ? [rehypeRaw] : [];
 
   const renderedBody = renderToStaticMarkup(
-    createElement(ReactMarkdown, { remarkPlugins: plugins, rehypePlugins, urlTransform: allowDataUris } as any, body),
+    createElement(ReactMarkdown, { remarkPlugins: plugins, rehypePlugins, urlTransform: allowDataUris, components: footnoteComponents } as any, body),
   );
 
   return `<!DOCTYPE html>

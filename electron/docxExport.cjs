@@ -36,6 +36,18 @@ async function convertMarkdownToDocx(markdown) {
   }
   body = body.replace(/^\[\^(\w+)\]:\s*.+$/gm, '').trim();
 
+  // Footnote numbering start: Word auto-numbers footnotes from 1, but the source
+  // may begin at another number (e.g. an excerpt whose notes start at 33). Use the
+  // FIRST footnote reference's printed number as Word's "start at" value so the
+  // displayed numbers match the original. Numbering is continuous from there, so
+  // gaps render consecutively (the exact numbers are preserved in the Markdown).
+  let footnoteNumStart = 0;
+  const firstFnRef = body.match(/\[\^(\d+)\]/);
+  if (firstFnRef) {
+    const n = parseInt(firstFnRef[1], 10);
+    if (!isNaN(n) && n > 1) footnoteNumStart = n;
+  }
+
   // Map footnote keys to sequential indices
   const fnKeyToIndex = new Map();
   const footnotes = {};
@@ -322,7 +334,64 @@ async function convertMarkdownToDocx(markdown) {
   });
 
   const rawBuffer = await Packer.toBuffer(doc);
-  return await deduplicateHeadingStyles(rawBuffer);
+  let outBuffer = await deduplicateHeadingStyles(rawBuffer);
+  if (footnoteNumStart > 1) outBuffer = await setFootnoteNumStart(outBuffer, footnoteNumStart);
+  return outBuffer;
+}
+
+/**
+ * Make Word display footnote numbers beginning at `startNum` (e.g. an excerpt
+ * whose notes start at 33) instead of always renumbering from 1. Numbering is
+ * continuous from the start value — gaps in the source are not reproduced (the
+ * exact numbers live in the Markdown).
+ *
+ * Word reads the footnote "start at" value from the SECTION properties
+ * (w:sectPr/w:footnotePr), NOT the document-wide default in settings.xml, so we
+ * inject into both: the section override (what Word honors) and the document
+ * default (broad-compat for other readers). Schema note: in CT_Settings
+ * <w:footnotePr> precedes <w:compat>; in CT_SectPr it precedes <w:pgSz> et al.
+ * (these exports carry no header/footer references), so inserting it right after
+ * the <w:sectPr> opening tag is valid.
+ */
+async function setFootnoteNumStart(buffer, startNum) {
+  const JSZip = (await import('jszip')).default;
+  const zip = await JSZip.loadAsync(buffer);
+  const frag = `<w:footnotePr><w:numStart w:val="${startNum}"/></w:footnotePr>`;
+  let changed = false;
+
+  // (1) Document-wide default in settings.xml (broad compat for non-Word readers).
+  const settingsFile = zip.file('word/settings.xml');
+  if (settingsFile) {
+    let xml = await settingsFile.async('string');
+    if (!xml.includes('<w:footnotePr')) {
+      if (xml.includes('<w:compat')) {
+        xml = xml.replace('<w:compat', `${frag}<w:compat`);
+        zip.file('word/settings.xml', xml);
+        changed = true;
+      } else if (xml.includes('</w:settings>')) {
+        xml = xml.replace('</w:settings>', `${frag}</w:settings>`);
+        zip.file('word/settings.xml', xml);
+        changed = true;
+      }
+    }
+  }
+
+  // (2) Section override in document.xml — the location Word actually honors.
+  const docFile = zip.file('word/document.xml');
+  if (docFile) {
+    let xml = await docFile.async('string');
+    if (!xml.includes('<w:footnotePr')) {
+      const patched = xml.replace(/<w:sectPr\b[^>]*>/g, (tag) => `${tag}${frag}`);
+      if (patched !== xml) {
+        zip.file('word/document.xml', patched);
+        changed = true;
+      }
+    }
+  }
+
+  if (!changed) return buffer;
+  const result = await zip.generateAsync({ type: 'uint8array' });
+  return Buffer.from(result);
 }
 
 /**
