@@ -8,6 +8,7 @@ import {
   batchDelay,
   extractTrailingHeadings,
   correctOcrHeadingsWithLlm,
+  parseNoteStyle,
 } from './gemini';
 import { cleanHeadings } from './headingCleanup';
 import { getScanProvider, getTranscribeProvider } from './providers/registry';
@@ -129,7 +130,7 @@ function normalizeHeadingText(text: string): string {
 }
 
 /** Build YAML frontmatter from file metadata. */
-function buildFrontmatter(fileName: string, totalPages: number): string {
+function buildFrontmatter(fileName: string, totalPages: number, noteStyle?: string, notesPosition?: string): string {
   const title = fileName
     .replace(/\.pdf$/i, '')
     .replace(/_/g, ' ')
@@ -142,6 +143,15 @@ function buildFrontmatter(fileName: string, totalPages: number): string {
   const provider = transcribeProvider;
   const model = transcribeModels[0] ?? '';
   const scanInfo = scanProvider !== transcribeProvider ? `\nscan_provider: "${scanProvider}"` : '';
+  // Flag endnote documents so the DOCX exporters render the [^N] notes as native
+  // Word endnotes (rather than page-bottom footnotes). The Markdown file keeps the
+  // [^N] references + [^N]: definitions with their printed numbers either way.
+  // `notes_position` controls where Word collects the endnotes: "section-end"
+  // (end of each chapter — the default for per-chapter numbering) or "document-end"
+  // (the very back — default for continuous numbering). Edit it to adjust per book.
+  const notesInfo = noteStyle === 'endnotes'
+    ? `\nnotes: "endnotes"${notesPosition ? `\nnotes_position: "${notesPosition}"` : ''}`
+    : '';
   return `---
 title: "${title}"
 source_file: "${fileName}"
@@ -149,7 +159,7 @@ pages: ${totalPages}
 converted: "${date}"
 converter: "PDF Transcriber"
 provider: "${provider}"
-model: "${model}"${scanInfo}
+model: "${model}"${scanInfo}${notesInfo}
 ---`;
 }
 
@@ -206,6 +216,27 @@ function dedupeFootnoteLabels(batches: string[]): { results: string[]; renamed: 
   });
 
   return { results: out, renamed };
+}
+
+/**
+ * Remove fabricated placeholder footnote definitions — junk the model emits for
+ * endnote documents when it sees a reference number but the note text is not on
+ * the visible pages (e.g. "[^5]: [footnote text not available in visible pages]",
+ * "[^8]: [Footnote content omitted in source]"). Only a definition whose entire
+ * body is a bracketed "missing/omitted/not available" phrase is removed — a real
+ * note is never just that — so this is safe to run in every mode, and also covers
+ * the case where an endnote book is mis-classified by the prescan.
+ */
+function stripPlaceholderFootnoteDefs(batches: string[]): { results: string[]; removed: number } {
+  const placeholderRe = /^\[\^\w+\]:\s*\[[^\]]*\b(?:omitted|missing|unavailable|not\s+(?:available|visible|shown|present|provided|included))\b[^\]]*\]\s*$/i;
+  let removed = 0;
+  const out = batches.map(batch =>
+    batch.split('\n').filter(line => {
+      if (placeholderRe.test(line.trim())) { removed++; return false; }
+      return true;
+    }).join('\n'),
+  );
+  return { results: out, removed };
 }
 
 /** Convert a single PDF file to Markdown, with optional resume and cancel support. */
@@ -372,18 +403,56 @@ export async function convertFile(options: ConvertFileOptions): Promise<string> 
     }
   }
 
-  // C — guard against duplicate footnote labels across batches. The transcribe
-  // prompt preserves each note's printed number as its [^N] label; if the
-  // document restarts footnote numbering partway through, two batches can each
-  // define [^1], which is invalid Markdown (and silently drops a note). Rename
-  // later collisions to a unique \w-safe label. No-op when labels are already
-  // unique (the common case, including gapped-but-unique numbering).
-  const { results: dedupedFn, renamed: fnRenamed } = dedupeFootnoteLabels(results);
-  if (fnRenamed > 0) {
-    results.length = 0;
-    results.push(...dedupedFn);
-    onProgress({ statusMessage: `Footnote labels: ${fnRenamed} duplicate(s) disambiguated` });
-    console.log(`[convert] Footnote dedupe: ${fnRenamed} duplicate label(s) renamed across batches`);
+  // Default endnote position written to frontmatter (set in the endnote branch).
+  let endnotePosition: string | undefined;
+
+  // Always strip fabricated placeholder footnote definitions. These are pure
+  // junk ("[^5]: [footnote text not available]") and removing them is safe in
+  // every mode — it also rescues an endnote book that the prescan mis-classified.
+  {
+    const { results: cleaned, removed } = stripPlaceholderFootnoteDefs(results);
+    if (removed > 0) {
+      results.length = 0;
+      results.push(...cleaned);
+      onProgress({ statusMessage: `Removed ${removed} empty placeholder footnote(s)` });
+      console.log(`[convert] Removed ${removed} placeholder footnote definition(s)`);
+    }
+  }
+
+  if (parseNoteStyle(outline) === 'endnotes') {
+    // Endnote documents: keep the [^N] references and [^N]: definitions exactly as
+    // transcribed, with their printed numbers (which may restart each chapter).
+    // We deliberately do NOT run the footnote dedupe here — for endnotes the
+    // repeated [^1] labels across chapters are meaningful, and the DOCX exporter
+    // reconciles reference↔definition (chapter-scoped) when it builds native Word
+    // endnotes. The frontmatter `notes: endnotes` flag tells the exporter to do so.
+    // (placeholder strip above already removed any fabricated definitions.)
+    //
+    // Detect whether the printed numbers restart per chapter (a definition number
+    // lower than the previous one) to pick the default endnote position written to
+    // the frontmatter: per-chapter → end of each section; continuous → end of doc.
+    const defNums = [...results.join('\n').matchAll(/^\[\^(\d+)\]:/gm)].map(m => parseInt(m[1], 10));
+    let perChapter = false;
+    for (let k = 1; k < defNums.length; k++) {
+      if (defNums[k] < defNums[k - 1]) { perChapter = true; break; }
+    }
+    endnotePosition = perChapter ? 'section-end' : 'document-end';
+    onProgress({ statusMessage: `Endnotes: ${defNums.length} note(s), ${perChapter ? 'per-chapter' : 'continuous'} numbering` });
+    console.log(`[convert] Endnotes: ${defNums.length} [^N]: definition(s), ${perChapter ? 'per-chapter (section-end)' : 'continuous (document-end)'}; exporter builds native Word endnotes`);
+  } else {
+    // C — guard against duplicate footnote labels across batches. The transcribe
+    // prompt preserves each note's printed number as its [^N] label; if the
+    // document restarts footnote numbering partway through, two batches can each
+    // define [^1], which is invalid Markdown (and silently drops a note). Rename
+    // later collisions to a unique \w-safe label. No-op when labels are already
+    // unique (the common case, including gapped-but-unique numbering).
+    const { results: dedupedFn, renamed: fnRenamed } = dedupeFootnoteLabels(results);
+    if (fnRenamed > 0) {
+      results.length = 0;
+      results.push(...dedupedFn);
+      onProgress({ statusMessage: `Footnote labels: ${fnRenamed} duplicate(s) disambiguated` });
+      console.log(`[convert] Footnote dedupe: ${fnRenamed} duplicate label(s) renamed across batches`);
+    }
   }
 
   // Report page number extraction for OCR mode
@@ -422,7 +491,7 @@ export async function convertFile(options: ConvertFileOptions): Promise<string> 
   if (getSettings().headingCleanupEnabled) {
     body = cleanHeadings(body);
   }
-  const frontmatter = buildFrontmatter(file.name, totalPages);
+  const frontmatter = buildFrontmatter(file.name, totalPages, parseNoteStyle(outline), endnotePosition);
 
   // The prescan `outline` is used internally to set heading levels (batch prompt
   // + OCR heading correction). It is intentionally NOT embedded in the output —
