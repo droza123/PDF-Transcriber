@@ -5,9 +5,9 @@
  */
 
 const {
-  stripPlaceholderEndnoteDefs, detectEndnoteNumbering, reconcilePerChapterEndnotes,
-  mergeEndnoteContinuations, extractEndnotePages, stripPrintedNotesSection,
-  applyEndnoteFormatting, SECTION_BREAK_MARKER,
+  stripPlaceholderEndnoteDefs, detectEndnoteNumbering, fillEndnoteGaps,
+  reconcilePerChapterEndnotes, mergeEndnoteContinuations, extractEndnotePages,
+  stripPrintedNotesSection, applyEndnoteFormatting, SECTION_BREAK_MARKER,
 } = require('./endnotes.cjs');
 
 async function convertMarkdownToDocx(markdown) {
@@ -44,6 +44,7 @@ async function convertMarkdownToDocx(markdown) {
   // becomes Word endnotes). The body [^N]/[^N]: machinery below is reused as-is.
   const isEndnote = frontmatter.notes === 'endnotes';
   let endnoteNumbering = 'continuous';
+  let endnoteFirstNumber = 0;
   let endnotePages = new Map();
   if (isEndnote) {
     // Drop transcription placeholder defs ("[^N]: [Endnote N]") first — a stray
@@ -53,10 +54,22 @@ async function convertMarkdownToDocx(markdown) {
     body = ph.body;
     if (ph.dropped) console.log(`[docx] Dropped ${ph.dropped} placeholder endnote definition(s)`);
     endnoteNumbering = detectEndnoteNumbering(body).numbering;
-    if (endnoteNumbering === 'per-chapter') {
+    const perChapter = endnoteNumbering === 'per-chapter';
+    // Recover notes whose body marker was lost (trapped in a code-block table, or dropped
+    // by OCR / a skipped page) so they aren't invisible and the displayed numbers stay
+    // aligned with the printed book — whatever the cause of the gap.
+    const gap = fillEndnoteGaps(body, perChapter);
+    body = gap.body;
+    endnoteFirstNumber = gap.firstNumber;
+    if (gap.skipped) {
+      console.warn(`[docx] WARNING: endnote chapter groups mismatch — gap-fill skipped (notes may be missing or mis-numbered)`);
+    } else if (gap.synthRefs || gap.stubDefs) {
+      console.log(`[docx] Endnote gap-fill: ${gap.synthRefs} reference(s) recovered, ${gap.stubDefs} missing-note stub(s) inserted`);
+    }
+    if (perChapter) {
       const r = reconcilePerChapterEndnotes(body);
       body = r.body;
-      console.log(`[docx] Endnotes (per-chapter): ${r.matched} reference(s) linked, ${r.unmatchedRefs} unmatched (${r.refGroups} reference group(s)/${r.defGroups} definition group(s))`);
+      console.log(`[docx] Endnotes (per-chapter): ${r.matched} reference(s) linked, ${r.repeatRefs} repeat(s), ${r.unmatchedRefs} unmatched (${r.refGroups} reference group(s)/${r.defGroups} definition group(s))`);
       if (r.refGroups !== r.defGroups) {
         console.warn(`[docx] WARNING: endnote chapter groups mismatch (${r.refGroups} reference vs ${r.defGroups} definition) — links may resolve to the wrong chapter`);
       }
@@ -67,6 +80,18 @@ async function convertMarkdownToDocx(markdown) {
     body = mergeEndnoteContinuations(body);
     endnotePages = extractEndnotePages(body);
     body = stripPrintedNotesSection(body);
+  } else {
+    // Footnote books use continuous numbering; the same gap recovery applies so a
+    // dropped/trapped marker doesn't make its note invisible and shift the rest down.
+    // No-op when there are no numeric [^N] notes or no gaps; text-label footnotes
+    // (e.g. [^methods]) are left untouched.
+    const gap = fillEndnoteGaps(body, false);
+    body = gap.body;
+    if (gap.skipped) {
+      console.warn(`[docx] WARNING: footnote groups mismatch — gap-fill skipped (notes may be missing or mis-numbered)`);
+    } else if (gap.synthRefs || gap.stubDefs) {
+      console.log(`[docx] Footnote gap-fill: ${gap.synthRefs} reference(s) recovered, ${gap.stubDefs} missing-note stub(s) inserted`);
+    }
   }
   const NoteRefRun = isEndnote ? EndnoteReferenceRun : FootnoteReferenceRun;
 
@@ -427,7 +452,7 @@ async function convertMarkdownToDocx(markdown) {
     const position = frontmatter.notes_position === 'document-end' ? 'docEnd'
       : frontmatter.notes_position === 'section-end' ? 'sectEnd'
       : (perChapter ? 'sectEnd' : 'docEnd');
-    outBuffer = await applyEndnoteFormatting(outBuffer, { perChapter, position });
+    outBuffer = await applyEndnoteFormatting(outBuffer, { perChapter, position, numStart: endnoteFirstNumber });
   } else if (footnoteNumStart > 1) {
     outBuffer = await setFootnoteNumStart(outBuffer, footnoteNumStart);
   }
@@ -585,7 +610,9 @@ function formatText(text, TextRun) {
              .replace(/&quot;/g, '"').replace(/&#(\d+);/g, (_, n) => String.fromCharCode(n));
 
   const runs = [];
-  const regex = /(\*\*\*(.+?)\*\*\*|\*\*(.+?)\*\*|\*(.+?)\*|<br\s*\/?>)/gi;
+  // Inline markup: ***bold+italic***, **bold**, *italic*, <sup>…</sup> / <sub>…</sub>
+  // (the transcription emits these for Scripture verse numbers etc.), and <br>.
+  const regex = /(\*\*\*(.+?)\*\*\*|\*\*(.+?)\*\*|\*(.+?)\*|<sup>(.+?)<\/sup>|<sub>(.+?)<\/sub>|<br\s*\/?>)/gi;
   let lastIdx = 0;
   let match;
 
@@ -599,6 +626,10 @@ function formatText(text, TextRun) {
       runs.push(new TextRun({ text: match[3], bold: true }));
     } else if (match[4]) {
       runs.push(new TextRun({ text: match[4], italics: true }));
+    } else if (match[5] != null) {
+      runs.push(new TextRun({ text: match[5], superScript: true }));
+    } else if (match[6] != null) {
+      runs.push(new TextRun({ text: match[6], subScript: true }));
     } else {
       // <br> tag — insert a line break
       runs.push(new TextRun({ break: 1 }));

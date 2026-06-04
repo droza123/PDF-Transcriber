@@ -77,6 +77,147 @@ function detectEndnoteNumbering(body) {
   };
 }
 
+/** Visible placeholder for a note whose printed reference exists but whose text was
+ *  lost in transcription (e.g. a truncated notes section). Shown, never silent. */
+const STUB_NOTE_TEXT = '*[Note text not captured from source]*';
+
+/**
+ * Recover endnotes whose body reference marker was lost — trapped inside a fenced code
+ * block (an OCR'd table) or dropped outright by OCR / a skipped page — and keep the
+ * displayed numbers aligned with the printed book no matter why a number is skipped.
+ *
+ * Native Word/Logos endnotes are auto-numbered by REFERENCE order within a numbering
+ * section, so any printed number lacking a live reference makes its note invisible AND
+ * shifts every following note's number down by one. Per chapter (numbering-reset group)
+ * we make the references a gapless run from the chapter's first number up to maxDef —
+ * the highest printed number that actually has note text — inserting whatever is missing:
+ *   • note text but no body reference   → synthesize a [^N] marker in ascending order
+ *     just before the first higher reference (placement is approximate — we only know
+ *     which two real notes it falls between — but the note is recovered and numbered).
+ *   • a body reference but no note text (a real note follows, N < maxDef) → insert a
+ *     VISIBLE stub definition so the number is occupied and following notes don't drift.
+ *   • a number missing from BOTH (a true gap below maxDef) → insert both, keeping the
+ *     run gapless.
+ * Printed numbers ABOVE maxDef (e.g. a notes section truncated mid-chapter) are left as
+ * plain superscript text: correct literal numbers, nothing real follows them, so they
+ * neither drift nor add noise.
+ *
+ * Runs BEFORE reconcilePerChapterEndnotes. Aligns the k-th reference group with the k-th
+ * definition group; if the group COUNTS differ it makes NO change (skipped:true) so a
+ * chapter is never guessed. `perChapter` sets the run's start: per-chapter chapters fill
+ * from 1 (Word restarts each section at 1); a continuous book fills from its first printed
+ * number, returned as `firstNumber` for the numbering "start at" value.
+ * Returns { body, synthRefs, stubDefs, firstNumber, skipped }.
+ */
+function fillEndnoteGaps(body, perChapter) {
+  const lines = body.split('\n');
+  const defLineRe = /^\[\^(\d+)\]:/;
+  const refRe = /\[\^(\d+)\]/g;
+
+  // References (skip code fences + definition lines), grouped by reset, with positions.
+  const refGroups = [];
+  {
+    let cur = null, last = null, inCode = false;
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].trim().startsWith('```')) { inCode = !inCode; continue; }
+      if (inCode) continue;
+      if (defLineRe.test(lines[i].trim())) continue;
+      let m; refRe.lastIndex = 0;
+      while ((m = refRe.exec(lines[i])) !== null) {
+        const n = parseInt(m[1], 10);
+        if (last === null || n < last) { cur = []; refGroups.push(cur); }
+        cur.push({ n, lineIdx: i, start: m.index, end: m.index + m[0].length });
+        last = n;
+      }
+    }
+  }
+  // Definitions, grouped by reset, with line indices.
+  const defGroups = [];
+  {
+    let cur = null, last = null;
+    for (let i = 0; i < lines.length; i++) {
+      const m = lines[i].trim().match(defLineRe);
+      if (!m) continue;
+      const n = parseInt(m[1], 10);
+      if (last === null || n < last) { cur = []; defGroups.push(cur); }
+      cur.push({ n, lineIdx: i });
+      last = n;
+    }
+  }
+
+  const firstNumber = (defGroups.length && defGroups[0].length)
+    ? Math.min(...defGroups[0].map(d => d.n), ...(refGroups[0] ? refGroups[0].map(r => r.n) : []))
+    : 1;
+  if (refGroups.length === 0 || refGroups.length !== defGroups.length) {
+    return { body, synthRefs: 0, stubDefs: 0, firstNumber, skipped: refGroups.length !== defGroups.length };
+  }
+
+  const refInsertAt = new Map();    // `${lineIdx}:${pos}` -> { lineIdx, pos, labels:[n,...] }
+  const stubBeforeLine = new Map(); // lineIdx -> [n,...]   stub defs inserted BEFORE this line
+  const stubAfterLine = new Map();  // lineIdx -> [n,...]   stub defs inserted AFTER this line
+  const addTo = (map, key, n) => { if (!map.has(key)) map.set(key, []); map.get(key).push(n); };
+  let synthRefs = 0, stubDefs = 0;
+
+  for (let k = 0; k < refGroups.length; k++) {
+    const refs = refGroups[k];
+    const defs = defGroups[k];
+    const refNums = new Set(refs.map(r => r.n));
+    const defNums = new Set(defs.map(d => d.n));
+    const maxDef = Math.max(...defs.map(d => d.n));
+    const lo = perChapter ? 1 : Math.min(...defs.map(d => d.n), ...refs.map(r => r.n));
+
+    for (let n = lo; n <= maxDef; n++) {
+      const hasRef = refNums.has(n);
+      const hasDef = defNums.has(n);
+      if (hasRef && hasDef) continue;
+
+      if (!hasRef) {
+        // Place [^N] so the reference run stays ascending: just before the first existing
+        // reference greater than N, else after the group's last reference.
+        let target;
+        const higher = refs.find(r => r.n > n);
+        if (higher) target = { lineIdx: higher.lineIdx, pos: higher.start };
+        else if (refs.length) { const lr = refs[refs.length - 1]; target = { lineIdx: lr.lineIdx, pos: lr.end }; }
+        else target = { lineIdx: defs[0].lineIdx, pos: 0 };
+        const key = `${target.lineIdx}:${target.pos}`;
+        if (!refInsertAt.has(key)) refInsertAt.set(key, { lineIdx: target.lineIdx, pos: target.pos, labels: [] });
+        refInsertAt.get(key).labels.push(n);
+        synthRefs++;
+      }
+      if (!hasDef) {
+        // Insert a stub definition in ascending order: before the first higher definition.
+        const higherDef = defs.find(d => d.n > n);
+        if (higherDef) addTo(stubBeforeLine, higherDef.lineIdx, n);
+        else addTo(stubAfterLine, defs[defs.length - 1].lineIdx, n);
+        stubDefs++;
+      }
+    }
+  }
+
+  // Splice synthetic references in, rightmost position first so earlier offsets stay valid.
+  const byLine = new Map();
+  for (const ins of refInsertAt.values()) addTo(byLine, ins.lineIdx, ins);
+  for (const [lineIdx, inss] of byLine) {
+    inss.sort((a, b) => b.pos - a.pos);
+    let line = lines[lineIdx];
+    for (const ins of inss) {
+      const text = ins.labels.sort((a, b) => a - b).map(n => `[^${n}]`).join('');
+      line = line.slice(0, ins.pos) + text + line.slice(ins.pos);
+    }
+    lines[lineIdx] = line;
+  }
+
+  // Emit, inserting stub-definition lines around their anchors (ascending).
+  const out = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (stubBeforeLine.has(i)) for (const n of stubBeforeLine.get(i).sort((a, b) => a - b)) out.push(`[^${n}]: ${STUB_NOTE_TEXT}`);
+    out.push(lines[i]);
+    if (stubAfterLine.has(i)) for (const n of stubAfterLine.get(i).sort((a, b) => a - b)) out.push(`[^${n}]: ${STUB_NOTE_TEXT}`);
+  }
+
+  return { body: out.join('\n'), synthRefs, stubDefs, firstNumber, skipped: false };
+}
+
 /**
  * Per-chapter reconciliation. Rewrites the body so each body reference and its
  * matching definition share a unique synthetic label `e{K}`, and inserts a
@@ -119,9 +260,16 @@ function reconcilePerChapterEndnotes(body) {
   //    literal text. Leave such a [^N] untouched (it stays as the OCR emitted it).
   let matched = 0;
   let unmatchedRefs = 0;
+  let repeatRefs = 0;
   let inCodeBlock = false;
   const state = { groupIdx: -1, lastN: null };
   const groupStartLine = []; // groupStartLine[k] = first reference line of chapter k
+  // A note may be referenced more than once in a chapter, but a native Word/Logos
+  // endnote can carry only ONE reference mark. We rewrite the FIRST occurrence of each
+  // (chapter, number) to its unique label (→ a real endnote reference) and leave any
+  // repeat as the printed [^N], which makeRuns renders as a plain superscript number.
+  // Rewriting the repeat too would leak the internal "eK" label as visible body text.
+  const emitted = new Set(); // `${groupIdx}:${n}` already turned into a real reference
   for (let i = 0; i < lines.length; i++) {
     if (lines[i].trim().startsWith('```')) { inCodeBlock = !inCodeBlock; continue; }
     if (inCodeBlock) continue;
@@ -138,8 +286,10 @@ function reconcilePerChapterEndnotes(body) {
       state.lastN = n;
       if (groupStartLine[state.groupIdx] === undefined) groupStartLine[state.groupIdx] = i;
       const label = groupNumToLabel[state.groupIdx] ? groupNumToLabel[state.groupIdx].get(n) : null;
+      const key = `${state.groupIdx}:${n}`;
       result += lines[i].slice(lastIdx, m.index);
-      if (label) { result += `[^${label}]`; matched += 1; }
+      if (label && !emitted.has(key)) { result += `[^${label}]`; emitted.add(key); matched += 1; }
+      else if (label) { result += m[0]; repeatRefs += 1; } // repeat reference — keep printed number
       else { result += m[0]; unmatchedRefs += 1; }
       lastIdx = m.index + m[0].length;
     }
@@ -182,7 +332,7 @@ function reconcilePerChapterEndnotes(body) {
     out.push(lines[i]);
   }
 
-  return { body: out.join('\n'), matched, unmatchedRefs, defGroups: defGroups.length, refGroups: groupStartLine.length };
+  return { body: out.join('\n'), matched, unmatchedRefs, repeatRefs, defGroups: defGroups.length, refGroups: groupStartLine.length };
 }
 
 /**
@@ -338,22 +488,30 @@ function stripPrintedNotesSection(body) {
  * honors, exactly as for footnote numbering (see setFootnoteNumStart). No-op if
  * endnote properties already exist.
  *
- * @param {{ perChapter: boolean, position: 'sectEnd'|'docEnd' }} options
+ *   • numStart — a continuous endnote book whose first note isn't 1 (e.g. an excerpt
+ *     starting at note 33) needs a "start at" value. Like footnotes (see
+ *     setFootnoteNumStart), Word honors this on the SECTION endnotePr — the document
+ *     default alone is ignored — so it goes on both. Per-chapter books restart each
+ *     section at 1, so no start offset applies there. Child order in CT_EdnProps is
+ *     fixed: pos, numFmt, numStart, numRestart.
+ *
+ * @param {{ perChapter: boolean, position: 'sectEnd'|'docEnd', numStart?: number }} options
  */
 async function applyEndnoteFormatting(buffer, options) {
-  const { perChapter, position } = options;
+  const { perChapter, position, numStart } = options;
   const JSZip = (await import('jszip')).default;
   const zip = await JSZip.loadAsync(buffer);
   const numFmt = '<w:numFmt w:val="decimal"/>';
   const restart = perChapter ? '<w:numRestart w:val="eachSect"/>' : '';
+  const startFrag = (!perChapter && numStart && numStart > 1) ? `<w:numStart w:val="${numStart}"/>` : '';
   let changed = false;
 
-  // (1) Document-wide default in settings.xml: position + format (+ restart).
+  // (1) Document-wide default in settings.xml: position + format (+ start) (+ restart).
   const settingsFile = zip.file('word/settings.xml');
   if (settingsFile) {
     let xml = await settingsFile.async('string');
     if (!xml.includes('<w:endnotePr')) {
-      const frag = `<w:endnotePr><w:pos w:val="${position}"/>${numFmt}${restart}</w:endnotePr>`;
+      const frag = `<w:endnotePr><w:pos w:val="${position}"/>${numFmt}${startFrag}${restart}</w:endnotePr>`;
       if (xml.includes('<w:compat')) {
         xml = xml.replace('<w:compat', `${frag}<w:compat`);
         zip.file('word/settings.xml', xml);
@@ -372,7 +530,7 @@ async function applyEndnoteFormatting(buffer, options) {
   if (docFile) {
     let xml = await docFile.async('string');
     if (!xml.includes('<w:endnotePr')) {
-      const frag = `<w:endnotePr>${numFmt}${restart}</w:endnotePr>`;
+      const frag = `<w:endnotePr>${numFmt}${startFrag}${restart}</w:endnotePr>`;
       const patched = xml.replace(/<w:sectPr\b[^>]*>/g, (tag) => `${tag}${frag}`);
       if (patched !== xml) {
         zip.file('word/document.xml', patched);
@@ -390,6 +548,7 @@ module.exports = {
   SECTION_BREAK_MARKER,
   stripPlaceholderEndnoteDefs,
   detectEndnoteNumbering,
+  fillEndnoteGaps,
   reconcilePerChapterEndnotes,
   mergeEndnoteContinuations,
   extractEndnotePages,
