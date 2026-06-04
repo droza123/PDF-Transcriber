@@ -188,6 +188,12 @@ body {
   text-decoration: underline;
 }
 
+/* Endnote-preview reference/definition markers (see endnotesToPlainMarkdown). */
+.prose-pdf .en-note-ref {
+  color: var(--p-accent);
+  font-weight: 600;
+}
+
 .prose-pdf .footnotes {
   border-top: 1px solid var(--p-border);
   margin-top: 2em;
