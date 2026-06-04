@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo, memo, startTransition } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import rehypeRaw from 'rehype-raw';
 import { Copy, Check, Download, FolderOpen, Hash, Table2, BookOpen, Footprints, Search, X, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Columns2, FileText, Loader2, Radio, ListTree, Sparkles, RotateCcw, Save } from 'lucide-react';
 import type { ConversionJob } from '../types';
 import { downloadMarkdown, showInFolder, exportAsHtml, exportAsJson, exportAsDocx } from '../lib/download';
@@ -51,6 +52,11 @@ const MarkdownChunk = memo(function MarkdownChunk({ content, startHeadingIndex }
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
+      // rehype-raw renders inline HTML the transcription emits (e.g. <sup>1</sup>
+      // Scripture verse numbers) as real elements instead of literal text, matching
+      // the HTML/DOCX exports. Page-marker comments are pre-wrapped as code spans
+      // above, so rehype-raw only sees genuine inline HTML.
+      rehypePlugins={[rehypeRaw]}
       urlTransform={urlTransform}
       components={{
         code({ children, className, ...props }) {
