@@ -16,6 +16,7 @@ const DOCUMENT_CSS = `
   th, td { border: 1px solid #ddd; padding: 0.5em; text-align: left; }
   th { background: #f8f8f8; font-weight: 600; }
   sup a { color: #2563eb; text-decoration: none; }
+  .en-note-ref { color: #2563eb; font-weight: 600; }
   hr { border: none; border-top: 1px solid #ddd; margin: 2em 0; }
   .footnotes { border-top: 1px solid #ddd; margin-top: 2em; padding-top: 1em; font-size: 0.9em; color: #555; }
   .frontmatter { background: #f4f4f4; border: 1px solid #e0e0e0; border-radius: 6px; padding: 0.8em 1em; font-family: Consolas, 'Courier New', monospace; font-size: 0.85em; color: #555; margin-bottom: 1.5em; white-space: pre-wrap; line-height: 1.6; }
@@ -67,15 +68,23 @@ async function renderMarkdownToHtml(markdown: string, title: string): Promise<st
   const ReactMarkdown = (await import('react-markdown')).default;
   const remarkGfm = (await import('remark-gfm')).default;
   const rehypeRaw = (await import('rehype-raw').catch(() => ({ default: undefined }))).default;
-  const { footnoteComponents } = await import('./markdownFootnotes');
+  const { footnoteComponents, endnotesToPlainMarkdown } = await import('./markdownFootnotes');
 
   const { frontmatterHtml, body } = preprocessMarkdown(markdown);
+
+  // Endnote books restart numbering per chapter, so their [^N] labels repeat across
+  // chapters. A single GFM pass would dedup those to one note per number (cross-chapter
+  // mislinks, shadowed notes) — the same failure the DOCX exporter avoids. Render the
+  // notes as plain superscript text instead, matching the in-app Preview.
+  const fmMatch = markdown.match(/^---\n([\s\S]*?)\n---/);
+  const isEndnote = fmMatch ? /^notes:\s*"?endnotes"?/m.test(fmMatch[1]) : false;
+  const renderBody = isEndnote ? endnotesToPlainMarkdown(body) : body;
 
   const plugins: any[] = [remarkGfm];
   const rehypePlugins: any[] = rehypeRaw ? [rehypeRaw] : [];
 
   const renderedBody = renderToStaticMarkup(
-    createElement(ReactMarkdown, { remarkPlugins: plugins, rehypePlugins, urlTransform: allowDataUris, components: footnoteComponents } as any, body),
+    createElement(ReactMarkdown, { remarkPlugins: plugins, rehypePlugins, urlTransform: allowDataUris, components: footnoteComponents } as any, renderBody),
   );
 
   return `<!DOCTYPE html>

@@ -5,8 +5,9 @@
  */
 
 const {
-  detectEndnoteNumbering, reconcilePerChapterEndnotes, mergeEndnoteContinuations,
-  extractEndnotePages, stripPrintedNotesSection, applyEndnoteFormatting, SECTION_BREAK_MARKER,
+  stripPlaceholderEndnoteDefs, detectEndnoteNumbering, reconcilePerChapterEndnotes,
+  mergeEndnoteContinuations, extractEndnotePages, stripPrintedNotesSection,
+  applyEndnoteFormatting, SECTION_BREAK_MARKER,
 } = require('./endnotes.cjs');
 
 async function convertMarkdownToDocx(markdown) {
@@ -45,11 +46,20 @@ async function convertMarkdownToDocx(markdown) {
   let endnoteNumbering = 'continuous';
   let endnotePages = new Map();
   if (isEndnote) {
+    // Drop transcription placeholder defs ("[^N]: [Endnote N]") first — a stray
+    // mid-body block of these forms a phantom reset group that shifts per-chapter
+    // linking to the previous chapter's notes.
+    const ph = stripPlaceholderEndnoteDefs(body);
+    body = ph.body;
+    if (ph.dropped) console.log(`[docx] Dropped ${ph.dropped} placeholder endnote definition(s)`);
     endnoteNumbering = detectEndnoteNumbering(body).numbering;
     if (endnoteNumbering === 'per-chapter') {
       const r = reconcilePerChapterEndnotes(body);
       body = r.body;
-      console.log(`[docx] Endnotes (per-chapter): ${r.matched} reference(s) linked, ${r.unmatchedRefs} unmatched`);
+      console.log(`[docx] Endnotes (per-chapter): ${r.matched} reference(s) linked, ${r.unmatchedRefs} unmatched (${r.refGroups} reference group(s)/${r.defGroups} definition group(s))`);
+      if (r.refGroups !== r.defGroups) {
+        console.warn(`[docx] WARNING: endnote chapter groups mismatch (${r.refGroups} reference vs ${r.defGroups} definition) — links may resolve to the wrong chapter`);
+      }
     }
     // Fold continued (page-wrapped) notes back into their definitions first, then
     // capture each note's printed back-matter page BEFORE stripping the markers,

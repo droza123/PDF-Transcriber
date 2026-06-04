@@ -221,18 +221,23 @@ function dedupeFootnoteLabels(batches: string[]): { results: string[]; renamed: 
 /**
  * Remove fabricated placeholder footnote definitions — junk the model emits for
  * endnote documents when it sees a reference number but the note text is not on
- * the visible pages (e.g. "[^5]: [footnote text not available in visible pages]",
- * "[^8]: [Footnote content omitted in source]"). Only a definition whose entire
- * body is a bracketed "missing/omitted/not available" phrase is removed — a real
- * note is never just that — so this is safe to run in every mode, and also covers
- * the case where an endnote book is mis-classified by the prescan.
+ * the visible pages. Two shapes occur:
+ *   • a "missing/omitted/not available" phrase — e.g. "[^5]: [footnote text not
+ *     available in visible pages]", "[^8]: [Footnote content omitted in source]";
+ *   • a bare number echo — e.g. "[^98]: [Endnote 98]" (also "[Footnote N]"/"[Note N]").
+ * Only a definition whose ENTIRE body is such a bracketed stand-in is removed — a
+ * real note is never just that — so this is safe to run in every mode. Besides being
+ * junk, an echo block dropped mid-body would otherwise form a phantom numbering-reset
+ * group that shifts the DOCX exporter's per-chapter endnote linking by one chapter.
  */
 function stripPlaceholderFootnoteDefs(batches: string[]): { results: string[]; removed: number } {
-  const placeholderRe = /^\[\^\w+\]:\s*\[[^\]]*\b(?:omitted|missing|unavailable|not\s+(?:available|visible|shown|present|provided|included))\b[^\]]*\]\s*$/i;
+  const missingRe = /^\[\^\w+\]:\s*\[[^\]]*\b(?:omitted|missing|unavailable|not\s+(?:available|visible|shown|present|provided|included))\b[^\]]*\]\s*$/i;
+  const echoRe = /^\[\^\w+\]:\s*\[\s*(?:end|foot)?note\s*\d*\s*\]\s*$/i;
   let removed = 0;
   const out = batches.map(batch =>
     batch.split('\n').filter(line => {
-      if (placeholderRe.test(line.trim())) { removed++; return false; }
+      const t = line.trim();
+      if (missingRe.test(t) || echoRe.test(t)) { removed++; return false; }
       return true;
     }).join('\n'),
   );

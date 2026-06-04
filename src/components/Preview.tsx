@@ -5,7 +5,7 @@ import { Copy, Check, Download, FolderOpen, Hash, Table2, BookOpen, Footprints, 
 import type { ConversionJob } from '../types';
 import { downloadMarkdown, showInFolder, exportAsHtml, exportAsJson, exportAsDocx } from '../lib/download';
 import { cleanHeadings, forEachHeading, changeHeadingLevels } from '../lib/headingCleanup';
-import { footnoteComponents } from '../lib/markdownFootnotes';
+import { footnoteComponents, endnotesToPlainMarkdown } from '../lib/markdownFootnotes';
 
 interface PreviewProps {
   job?: ConversionJob;
@@ -182,13 +182,19 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
     return { frontmatter: '', body: md };
   }, [md]);
 
+  // Endnote books (frontmatter `notes: endnotes`) restart numbering per chapter and
+  // keep their notes in back-of-chapter NOTES sections — pages away from the [^N]
+  // references. The per-page chunking below would drop those notes (see
+  // endnotesToPlainMarkdown), so for endnote docs we render the notes as plain text.
+  const isEndnote = useMemo(() => /^notes:\s*"?endnotes"?/m.test(frontmatter), [frontmatter]);
+
   // Replace HTML comments with backtick-wrapped code so ReactMarkdown renders them
-  const renderedBody = useMemo(() =>
-    body
+  const renderedBody = useMemo(() => {
+    const withComments = body
       .replace(/<!--\s*(page:\s*.+?)\s*-->/g, '`<!-- $1 -->`')
-      .replace(/<!--\s*(Document Outline)\s*-->/g, '`<!-- $1 -->`'),
-    [body],
-  );
+      .replace(/<!--\s*(Document Outline)\s*-->/g, '`<!-- $1 -->`');
+    return isEndnote ? endnotesToPlainMarkdown(withComments) : withComments;
+  }, [body, isEndnote]);
 
   // Build document outline from body headings using the shared iterator
   // (guarantees index alignment with changeHeadingLevels).

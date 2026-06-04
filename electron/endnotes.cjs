@@ -33,6 +33,32 @@ function groupByReset(items) {
 }
 
 /**
+ * Drop placeholder note definitions the transcription emits when it can't read a
+ * note's actual text — lines whose entire definition body is a bracketed stand-in
+ * echoing the note number, e.g. "[^98]: [Endnote 98]" (also "[Footnote N]" /
+ * "[Note N]"). These carry no real content, and — far worse for per-chapter books —
+ * when such a block lands mid-body (before a chapter's real NOTES section) it forms
+ * a spurious definition-reset GROUP. That extra group shifts every chapter's
+ * reference→definition matching by one, so links resolve to the PREVIOUS chapter's
+ * notes (observed in Combat Myth: a stray [^98]..[^107] block inside Ch I's body).
+ * Removing them restores 1:1 chapter alignment. MUST run first in the endnote
+ * pipeline, before detectEndnoteNumbering / reconcilePerChapterEndnotes.
+ *
+ * The pattern is deliberately tight — only "[word + optional number]" with nothing
+ * else on the line — so a real note that merely starts with a bracket (e.g.
+ * "[^5]: [sic] …") is never dropped. Returns { body, dropped }.
+ */
+function stripPlaceholderEndnoteDefs(body) {
+  const placeholderRe = /^\s*\[\^\w+\]:\s*\[\s*(?:end|foot)?note\s*\d*\s*\]\s*$/i;
+  let dropped = 0;
+  const out = body.split('\n').filter((l) => {
+    if (placeholderRe.test(l)) { dropped += 1; return false; }
+    return true;
+  });
+  return { body: out.join('\n'), dropped };
+}
+
+/**
  * Classify endnote numbering from the [^N]: definitions in a body.
  * Returns { numbering: 'continuous' | 'per-chapter', defCount, groups }.
  */
@@ -60,7 +86,9 @@ function detectEndnoteNumbering(body) {
  * Matching: definitions and references are each grouped by numbering reset, in
  * document order; the k-th reference group is matched to the k-th definition group
  * by printed number. References with no matching definition keep their [^N] form
- * (rendered as a plain superscript). Returns { body, matched, unmatchedRefs }.
+ * (rendered as a plain superscript). Returns
+ * { body, matched, unmatchedRefs, defGroups, refGroups } — the exporters warn when
+ * defGroups !== refGroups (a stray definition block would shift chapter linking).
  */
 function reconcilePerChapterEndnotes(body) {
   const lines = body.split('\n');
@@ -85,11 +113,18 @@ function reconcilePerChapterEndnotes(body) {
 
   // 2) Rewrite references (skip definition lines), tracking the chapter group by
   //    reset so the same [^1] in different chapters maps to different labels.
+  //    Skip fenced code blocks: their content is rendered verbatim by the exporters
+  //    (makeRuns is never applied), so a [^N] inside one cannot become a live
+  //    reference — rewriting it would only leak the synthetic "[^eK]" label as
+  //    literal text. Leave such a [^N] untouched (it stays as the OCR emitted it).
   let matched = 0;
   let unmatchedRefs = 0;
+  let inCodeBlock = false;
   const state = { groupIdx: -1, lastN: null };
   const groupStartLine = []; // groupStartLine[k] = first reference line of chapter k
   for (let i = 0; i < lines.length; i++) {
+    if (lines[i].trim().startsWith('```')) { inCodeBlock = !inCodeBlock; continue; }
+    if (inCodeBlock) continue;
     if (defLineRe.test(lines[i].trim())) continue;
     if (!/\[\^\d+\]/.test(lines[i])) continue;
     let result = '';
@@ -147,7 +182,7 @@ function reconcilePerChapterEndnotes(body) {
     out.push(lines[i]);
   }
 
-  return { body: out.join('\n'), matched, unmatchedRefs };
+  return { body: out.join('\n'), matched, unmatchedRefs, defGroups: defGroups.length, refGroups: groupStartLine.length };
 }
 
 /**
@@ -353,6 +388,7 @@ async function applyEndnoteFormatting(buffer, options) {
 
 module.exports = {
   SECTION_BREAK_MARKER,
+  stripPlaceholderEndnoteDefs,
   detectEndnoteNumbering,
   reconcilePerChapterEndnotes,
   mergeEndnoteContinuations,
