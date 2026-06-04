@@ -1,13 +1,19 @@
 /**
- * Markdown-to-DOCX converter with native Word footnotes.
+ * Markdown-to-DOCX converter with native Word footnotes (and native Word endnotes
+ * for documents flagged `notes: endnotes` in their frontmatter).
  * Runs in Electron's main process (Node.js context).
  */
+
+const {
+  detectEndnoteNumbering, reconcilePerChapterEndnotes, mergeEndnoteContinuations,
+  extractEndnotePages, stripPrintedNotesSection, applyEndnoteFormatting, SECTION_BREAK_MARKER,
+} = require('./endnotes.cjs');
 
 async function convertMarkdownToDocx(markdown) {
   const docx = await import('docx');
   const {
     Document, Packer, Paragraph, TextRun, HeadingLevel,
-    FootnoteReferenceRun, BorderStyle, ImageRun,
+    FootnoteReferenceRun, EndnoteReferenceRun, SectionType, BorderStyle, ImageRun,
     Table, TableRow, TableCell, WidthType, AlignmentType,
   } = docx;
 
@@ -27,6 +33,33 @@ async function convertMarkdownToDocx(markdown) {
   // Remove everything between <!-- Document Outline --> and the next ---
   body = body.replace(/<!--\s*Document Outline\s*-->[\s\S]*?---\n?/, '');
 
+  // ── Endnote mode ─────────────────────────────────────────────────────────
+  // Documents flagged `notes: endnotes` carry [^N] references in the body and
+  // [^N]: definitions in a back-matter Notes section. Render these as NATIVE Word
+  // endnotes instead of page-bottom footnotes. For per-chapter numbering we first
+  // reconcile each reference with its (chapter-scoped) definition onto a unique
+  // label and split the document into one section per chapter so Word can restart
+  // the numbers; the printed Notes headings/page markers are removed (the text
+  // becomes Word endnotes). The body [^N]/[^N]: machinery below is reused as-is.
+  const isEndnote = frontmatter.notes === 'endnotes';
+  let endnoteNumbering = 'continuous';
+  let endnotePages = new Map();
+  if (isEndnote) {
+    endnoteNumbering = detectEndnoteNumbering(body).numbering;
+    if (endnoteNumbering === 'per-chapter') {
+      const r = reconcilePerChapterEndnotes(body);
+      body = r.body;
+      console.log(`[docx] Endnotes (per-chapter): ${r.matched} reference(s) linked, ${r.unmatchedRefs} unmatched`);
+    }
+    // Fold continued (page-wrapped) notes back into their definitions first, then
+    // capture each note's printed back-matter page BEFORE stripping the markers,
+    // so we can re-attach it to the endnote (a visible "[p. N]" run here).
+    body = mergeEndnoteContinuations(body);
+    endnotePages = extractEndnotePages(body);
+    body = stripPrintedNotesSection(body);
+  }
+  const NoteRefRun = isEndnote ? EndnoteReferenceRun : FootnoteReferenceRun;
+
   // ── Extract footnote definitions ─────────────────────────────────────────
   const footnoteMap = new Map();
   const fnDefRegex = /^\[\^(\w+)\]:\s*(.+)$/gm;
@@ -41,24 +74,41 @@ async function convertMarkdownToDocx(markdown) {
   // FIRST footnote reference's printed number as Word's "start at" value so the
   // displayed numbers match the original. Numbering is continuous from there, so
   // gaps render consecutively (the exact numbers are preserved in the Markdown).
+  // (Endnotes are auto-numbered by Word — for per-chapter books a settings patch
+  // restarts them each section; so this "start at" offset applies to footnotes only.)
   let footnoteNumStart = 0;
-  const firstFnRef = body.match(/\[\^(\d+)\]/);
-  if (firstFnRef) {
-    const n = parseInt(firstFnRef[1], 10);
-    if (!isNaN(n) && n > 1) footnoteNumStart = n;
+  if (!isEndnote) {
+    const firstFnRef = body.match(/\[\^(\d+)\]/);
+    if (firstFnRef) {
+      const n = parseInt(firstFnRef[1], 10);
+      if (!isNaN(n) && n > 1) footnoteNumStart = n;
+    }
   }
 
-  // Map footnote keys to sequential indices
+  // Map note keys to sequential indices (footnotes or endnotes)
   const fnKeyToIndex = new Map();
   const footnotes = {};
   let fnIndex = 1;
+  let prevNotePage = null;
   for (const [key, text] of footnoteMap) {
     fnKeyToIndex.set(key, fnIndex);
+    // For endnotes, lead with the printed back-matter page — but only when it
+    // changes from the previous note (mirrors how the book marks page boundaries).
+    // Styled like the body's "— page N —" markers (gold, italic).
+    const pageRuns = [];
+    if (isEndnote) {
+      const pg = endnotePages.get(key);
+      if (pg != null && pg !== prevNotePage) {
+        pageRuns.push(new TextRun({ text: `[p. ${pg}] `, color: 'B8976A', italics: true, size: 18 }));
+        prevNotePage = pg;
+      }
+    }
     footnotes[fnIndex] = {
       children: [new Paragraph({
         children: [
           new TextRun({ text: '  ', size: 20 }),
-          ...makeRuns(text, fnKeyToIndex, docx, null),
+          ...pageRuns,
+          ...makeRuns(text, fnKeyToIndex, docx, null, NoteRefRun),
         ],
         spacing: { after: 80 },
       })],
@@ -68,7 +118,11 @@ async function convertMarkdownToDocx(markdown) {
 
   // ── Split into lines and process ─────────────────────────────────────────
   const lines = body.split('\n');
-  const children = [];
+  // `children` accumulates the CURRENT Word section. Per-chapter endnote books
+  // emit SECTION_BREAK_MARKER lines, which flush the section so Word can restart
+  // endnote numbering per chapter; everything else stays in one section.
+  let children = [];
+  const sectionChunks = [];
   let inOutline = false;
   let inCodeBlock = false;
   let codeBlockContent = [];
@@ -102,6 +156,14 @@ async function convertMarkdownToDocx(markdown) {
   while (i < lines.length) {
     const line = lines[i];
     const trimmed = line.trim();
+
+    // ── Endnote per-chapter section break ──────────────────────────────
+    if (trimmed === SECTION_BREAK_MARKER) {
+      sectionChunks.push(children);
+      children = [];
+      i++;
+      continue;
+    }
 
     // ── Code blocks ────────────────────────────────────────────────────
     if (trimmed.startsWith('```')) {
@@ -193,7 +255,7 @@ async function convertMarkdownToDocx(markdown) {
           5: HeadingLevel.HEADING_5, 6: HeadingLevel.HEADING_6,
         };
         children.push(new Paragraph({
-          children: makeRuns(headingMatch[2], fnKeyToIndex, docx, usedFootnoteIds),
+          children: makeRuns(headingMatch[2], fnKeyToIndex, docx, usedFootnoteIds, NoteRefRun),
           heading: levels[level] || HeadingLevel.HEADING_6,
           spacing: { before: 240, after: 120 },
         }));
@@ -223,7 +285,7 @@ async function convertMarkdownToDocx(markdown) {
               const TABLE_WIDTH_TWIPS = 9360; // 6.5 inches text area
               return new TableCell({
                 children: [new Paragraph({
-                  children: makeRuns(cellText, fnKeyToIndex, docx, usedFootnoteIds),
+                  children: makeRuns(cellText, fnKeyToIndex, docx, usedFootnoteIds, NoteRefRun),
                   spacing: { after: 40 },
                 })],
                 width: { size: Math.floor(TABLE_WIDTH_TWIPS / cells.length), type: WidthType.DXA },
@@ -250,7 +312,7 @@ async function convertMarkdownToDocx(markdown) {
         i++;
       }
       children.push(new Paragraph({
-        children: makeRuns(quoteLines.join(' '), fnKeyToIndex, docx, usedFootnoteIds),
+        children: makeRuns(quoteLines.join(' '), fnKeyToIndex, docx, usedFootnoteIds, NoteRefRun),
         indent: { left: 720 },
         border: { left: { style: BorderStyle.SINGLE, size: 3, color: 'CCCCCC', space: 10 } },
         spacing: { before: 100, after: 100 },
@@ -292,7 +354,7 @@ async function convertMarkdownToDocx(markdown) {
 
     if (paraLines.length > 0) {
       children.push(new Paragraph({
-        children: makeRuns(paraLines.join(' '), fnKeyToIndex, docx, usedFootnoteIds),
+        children: makeRuns(paraLines.join(' '), fnKeyToIndex, docx, usedFootnoteIds, NoteRefRun),
         spacing: { after: 120 },
       }));
     }
@@ -317,8 +379,21 @@ async function convertMarkdownToDocx(markdown) {
     },
   }));
 
+  // Flush the final (or only) section.
+  sectionChunks.push(children);
+  // Per-chapter endnote books become one continuous section per chapter so Word
+  // can restart endnote numbering each section; everything else is one section.
+  const sections = sectionChunks.length > 1
+    ? sectionChunks.map((chunk, idx) => (
+        idx === 0
+          ? { children: chunk }
+          : { properties: { type: SectionType.CONTINUOUS }, children: chunk }
+      ))
+    : [{ children: sectionChunks[0] }];
+
+  const notesObj = Object.keys(footnotes).length > 0 ? footnotes : undefined;
   const doc = new Document({
-    footnotes: Object.keys(footnotes).length > 0 ? footnotes : undefined,
+    ...(notesObj ? (isEndnote ? { endnotes: notesObj } : { footnotes: notesObj }) : {}),
     styles: {
       paragraphStyles: [
         {
@@ -330,12 +405,22 @@ async function convertMarkdownToDocx(markdown) {
         ...headingStyles,
       ],
     },
-    sections: [{ children }],
+    sections,
   });
 
   const rawBuffer = await Packer.toBuffer(doc);
   let outBuffer = await deduplicateHeadingStyles(rawBuffer);
-  if (footnoteNumStart > 1) outBuffer = await setFootnoteNumStart(outBuffer, footnoteNumStart);
+  if (isEndnote) {
+    const perChapter = endnoteNumbering === 'per-chapter';
+    // Position default pairs with numbering (per-chapter → end of each section;
+    // continuous → end of document); overridable via `notes_position` frontmatter.
+    const position = frontmatter.notes_position === 'document-end' ? 'docEnd'
+      : frontmatter.notes_position === 'section-end' ? 'sectEnd'
+      : (perChapter ? 'sectEnd' : 'docEnd');
+    outBuffer = await applyEndnoteFormatting(outBuffer, { perChapter, position });
+  } else if (footnoteNumStart > 1) {
+    outBuffer = await setFootnoteNumStart(outBuffer, footnoteNumStart);
+  }
   return outBuffer;
 }
 
@@ -445,11 +530,13 @@ async function deduplicateHeadingStyles(buffer) {
 }
 
 /**
- * Build TextRun/FootnoteReferenceRun array from text with
- * inline formatting and footnote references.
+ * Build TextRun + note-reference run array from text with inline formatting and
+ * [^N] note references. `RefRunClass` is FootnoteReferenceRun or (for endnote
+ * documents) EndnoteReferenceRun; defaults to FootnoteReferenceRun.
  */
-function makeRuns(text, fnKeyToIndex, docx, usedFootnoteIds) {
-  const { TextRun, FootnoteReferenceRun } = docx;
+function makeRuns(text, fnKeyToIndex, docx, usedFootnoteIds, RefRunClass) {
+  const { TextRun } = docx;
+  const NoteRun = RefRunClass || docx.FootnoteReferenceRun;
   const runs = [];
 
   const fnRegex = /\[\^(\w+)\]/g;
@@ -462,8 +549,8 @@ function makeRuns(text, fnKeyToIndex, docx, usedFootnoteIds) {
     }
     const fnIdx = fnKeyToIndex.get(match[1]);
     if (fnIdx && usedFootnoteIds && !usedFootnoteIds.has(fnIdx)) {
-      // First reference — create real OOXML footnote
-      runs.push(new FootnoteReferenceRun(fnIdx));
+      // First reference — create the real OOXML footnote/endnote reference
+      runs.push(new NoteRun(fnIdx));
       usedFootnoteIds.add(fnIdx);
     } else {
       // No definition or duplicate reference — render as superscript text

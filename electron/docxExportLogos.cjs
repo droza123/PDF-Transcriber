@@ -7,13 +7,19 @@
  * - Headings wrapped with {{field-on:Heading}} / {{field-off:Heading}} tags
  * - No metadata block or document outline section
  * - Footnotes use standard Word footnotes (Logos reads them natively)
+ * - Endnote documents (frontmatter `notes: endnotes`) use native Word endnotes
  */
+
+const {
+  detectEndnoteNumbering, reconcilePerChapterEndnotes, mergeEndnoteContinuations,
+  extractEndnotePages, stripPrintedNotesSection, applyEndnoteFormatting, SECTION_BREAK_MARKER,
+} = require('./endnotes.cjs');
 
 async function convertMarkdownToDocxLogos(markdown) {
   const docx = await import('docx');
   const {
     Document, Packer, Paragraph, TextRun, HeadingLevel,
-    FootnoteReferenceRun, BorderStyle, ImageRun,
+    FootnoteReferenceRun, EndnoteReferenceRun, SectionType, BorderStyle, ImageRun,
     Table, TableRow, TableCell, WidthType, AlignmentType,
   } = docx;
 
@@ -33,6 +39,26 @@ async function convertMarkdownToDocxLogos(markdown) {
   // Remove everything between <!-- Document Outline --> and the next ---
   body = body.replace(/<!--\s*Document Outline\s*-->[\s\S]*?---\n?/, '');
 
+  // ── Endnote mode (see docxExport.cjs for the full rationale) ──────────────
+  const isEndnote = frontmatter.notes === 'endnotes';
+  let endnoteNumbering = 'continuous';
+  let endnotePages = new Map();
+  if (isEndnote) {
+    endnoteNumbering = detectEndnoteNumbering(body).numbering;
+    if (endnoteNumbering === 'per-chapter') {
+      const r = reconcilePerChapterEndnotes(body);
+      body = r.body;
+      console.log(`[docx-logos] Endnotes (per-chapter): ${r.matched} reference(s) linked, ${r.unmatchedRefs} unmatched`);
+    }
+    // Fold continued (page-wrapped) notes back into their definitions first, then
+    // capture each note's printed page before stripping markers, to re-attach it as
+    // a native Logos [[@Page:N]] milestone inside the endnote.
+    body = mergeEndnoteContinuations(body);
+    endnotePages = extractEndnotePages(body);
+    body = stripPrintedNotesSection(body);
+  }
+  const NoteRefRun = isEndnote ? EndnoteReferenceRun : FootnoteReferenceRun;
+
   // ── Extract footnote definitions ─────────────────────────────────────────
   const footnoteMap = new Map();
   const fnDefRegex = /^\[\^(\w+)\]:\s*(.+)$/gm;
@@ -42,29 +68,41 @@ async function convertMarkdownToDocxLogos(markdown) {
   }
   body = body.replace(/^\[\^(\w+)\]:\s*.+$/gm, '').trim();
 
-  // Footnote numbering start: Word auto-numbers footnotes from 1, but the source
-  // may begin at another number (e.g. an excerpt whose notes start at 33). Use the
-  // FIRST footnote reference's printed number as Word's "start at" value so the
-  // displayed numbers match the original. Numbering is continuous from there, so
-  // gaps render consecutively (the exact numbers are preserved in the Markdown).
+  // (Endnotes are auto-numbered by Word — see docxExport.cjs; "start at" is for footnotes only.)
   let footnoteNumStart = 0;
-  const firstFnRef = body.match(/\[\^(\d+)\]/);
-  if (firstFnRef) {
-    const n = parseInt(firstFnRef[1], 10);
-    if (!isNaN(n) && n > 1) footnoteNumStart = n;
+  if (!isEndnote) {
+    const firstFnRef = body.match(/\[\^(\d+)\]/);
+    if (firstFnRef) {
+      const n = parseInt(firstFnRef[1], 10);
+      if (!isNaN(n) && n > 1) footnoteNumStart = n;
+    }
   }
 
-  // Map footnote keys to sequential indices
+  // Map note keys to sequential indices (footnotes or endnotes)
   const fnKeyToIndex = new Map();
   const footnotes = {};
   let fnIndex = 1;
   for (const [key, text] of footnoteMap) {
     fnKeyToIndex.set(key, fnIndex);
+    // For endnotes, lead with the printed back-matter page as a VISIBLE "[p. N]"
+    // run on EVERY endnote. Logos/Verbum treats endnotes like footnotes — hover-only,
+    // viewed one at a time — so each note must carry its own page (no "only-on-change"
+    // collapsing, which only suits a printed list). A [[@Page]] milestone inside a
+    // note drives no navigation in Verbum, hence the visible marker. This does NOT
+    // touch the body's [[@Page:N]] milestones, so main-text page navigation is intact.
+    const pageRuns = [];
+    if (isEndnote) {
+      const pg = endnotePages.get(key);
+      if (pg != null) {
+        pageRuns.push(new TextRun({ text: `[p. ${pg}] `, color: 'B8976A', italics: true, size: 18, font: 'Times New Roman' }));
+      }
+    }
     footnotes[fnIndex] = {
       children: [new Paragraph({
         children: [
           new TextRun({ text: '  ', size: 20, font: 'Times New Roman' }),
-          ...makeRuns(text, fnKeyToIndex, docx, null),
+          ...pageRuns,
+          ...makeRuns(text, fnKeyToIndex, docx, null, NoteRefRun),
         ],
         spacing: { after: 80 },
       })],
@@ -74,7 +112,10 @@ async function convertMarkdownToDocxLogos(markdown) {
 
   // ── Split into lines and process ─────────────────────────────────────────
   const lines = body.split('\n');
-  const children = [];
+  // `children` accumulates the current Word section; per-chapter endnote books
+  // flush a section at each SECTION_BREAK_MARKER (for per-chapter number restart).
+  let children = [];
+  const sectionChunks = [];
   let inCodeBlock = false;
   let codeBlockContent = [];
   const usedFootnoteIds = new Set();
@@ -96,6 +137,14 @@ async function convertMarkdownToDocxLogos(markdown) {
   while (i < lines.length) {
     const line = lines[i];
     const trimmed = line.trim();
+
+    // ── Endnote per-chapter section break ──────────────────────────────
+    if (trimmed === SECTION_BREAK_MARKER) {
+      sectionChunks.push(children);
+      children = [];
+      i++;
+      continue;
+    }
 
     // ── Code blocks ────────────────────────────────────────────────────
     if (trimmed.startsWith('```')) {
@@ -172,7 +221,7 @@ async function convertMarkdownToDocxLogos(markdown) {
       children.push(new Paragraph({
         children: [
           new TextRun({ text: '{{field-on:Heading}}', size: 2, color: 'FFFFFF' }),
-          ...makeRuns(headingMatch[2], fnKeyToIndex, docx, usedFootnoteIds),
+          ...makeRuns(headingMatch[2], fnKeyToIndex, docx, usedFootnoteIds, NoteRefRun),
           new TextRun({ text: '{{field-off:Heading}}', size: 2, color: 'FFFFFF' }),
         ],
         heading: levels[level] || HeadingLevel.HEADING_6,
@@ -202,7 +251,7 @@ async function convertMarkdownToDocxLogos(markdown) {
               const TABLE_WIDTH_TWIPS = 9360; // 6.5 inches text area
               return new TableCell({
                 children: [new Paragraph({
-                  children: makeRuns(cellText, fnKeyToIndex, docx, usedFootnoteIds),
+                  children: makeRuns(cellText, fnKeyToIndex, docx, usedFootnoteIds, NoteRefRun),
                   spacing: { after: 40 },
                 })],
                 width: { size: Math.floor(TABLE_WIDTH_TWIPS / cells.length), type: WidthType.DXA },
@@ -229,7 +278,7 @@ async function convertMarkdownToDocxLogos(markdown) {
         i++;
       }
       children.push(new Paragraph({
-        children: makeRuns(quoteLines.join(' '), fnKeyToIndex, docx, usedFootnoteIds),
+        children: makeRuns(quoteLines.join(' '), fnKeyToIndex, docx, usedFootnoteIds, NoteRefRun),
         indent: { left: 720 },
         border: { left: { style: BorderStyle.SINGLE, size: 3, color: 'CCCCCC', space: 10 } },
         spacing: { before: 100, after: 100 },
@@ -258,7 +307,7 @@ async function convertMarkdownToDocxLogos(markdown) {
 
     if (paraLines.length > 0) {
       children.push(new Paragraph({
-        children: makeRuns(paraLines.join(' '), fnKeyToIndex, docx, usedFootnoteIds),
+        children: makeRuns(paraLines.join(' '), fnKeyToIndex, docx, usedFootnoteIds, NoteRefRun),
         spacing: { after: 120 },
       }));
     }
@@ -282,8 +331,20 @@ async function convertMarkdownToDocxLogos(markdown) {
     },
   }));
 
+  // Flush the final (or only) section. Per-chapter endnote books get one
+  // continuous section per chapter so Word can restart endnote numbering.
+  sectionChunks.push(children);
+  const sections = sectionChunks.length > 1
+    ? sectionChunks.map((chunk, idx) => (
+        idx === 0
+          ? { children: chunk }
+          : { properties: { type: SectionType.CONTINUOUS }, children: chunk }
+      ))
+    : [{ children: sectionChunks[0] }];
+
+  const notesObj = Object.keys(footnotes).length > 0 ? footnotes : undefined;
   const doc = new Document({
-    footnotes: Object.keys(footnotes).length > 0 ? footnotes : undefined,
+    ...(notesObj ? (isEndnote ? { endnotes: notesObj } : { footnotes: notesObj }) : {}),
     styles: {
       paragraphStyles: [
         {
@@ -295,12 +356,20 @@ async function convertMarkdownToDocxLogos(markdown) {
         ...headingStyles,
       ],
     },
-    sections: [{ children }],
+    sections,
   });
 
   const rawBuffer = await Packer.toBuffer(doc);
   let outBuffer = await deduplicateHeadingStyles(rawBuffer);
-  if (footnoteNumStart > 1) outBuffer = await setFootnoteNumStart(outBuffer, footnoteNumStart);
+  if (isEndnote) {
+    const perChapter = endnoteNumbering === 'per-chapter';
+    const position = frontmatter.notes_position === 'document-end' ? 'docEnd'
+      : frontmatter.notes_position === 'section-end' ? 'sectEnd'
+      : (perChapter ? 'sectEnd' : 'docEnd');
+    outBuffer = await applyEndnoteFormatting(outBuffer, { perChapter, position });
+  } else if (footnoteNumStart > 1) {
+    outBuffer = await setFootnoteNumStart(outBuffer, footnoteNumStart);
+  }
   return outBuffer;
 }
 
@@ -423,12 +492,14 @@ async function deduplicateHeadingStyles(buffer) {
 }
 
 /**
- * Build TextRun/FootnoteReferenceRun array from text with
- * inline formatting and footnote references.
+ * Build TextRun + note-reference run array from text with inline formatting and
+ * [^N] note references. `NoteRefRun` is FootnoteReferenceRun or (for endnote
+ * documents) EndnoteReferenceRun; defaults to FootnoteReferenceRun.
  * Uses Times New Roman for all text runs.
  */
-function makeRuns(text, fnKeyToIndex, docx, usedFootnoteIds) {
-  const { TextRun, FootnoteReferenceRun } = docx;
+function makeRuns(text, fnKeyToIndex, docx, usedFootnoteIds, NoteRefRun) {
+  const { TextRun } = docx;
+  const NoteRun = NoteRefRun || docx.FootnoteReferenceRun;
   const runs = [];
 
   const fnRegex = /\[\^(\w+)\]/g;
@@ -441,7 +512,7 @@ function makeRuns(text, fnKeyToIndex, docx, usedFootnoteIds) {
     }
     const fnIdx = fnKeyToIndex.get(match[1]);
     if (fnIdx && usedFootnoteIds && !usedFootnoteIds.has(fnIdx)) {
-      runs.push(new FootnoteReferenceRun(fnIdx));
+      runs.push(new NoteRun(fnIdx));
       usedFootnoteIds.add(fnIdx);
     } else {
       runs.push(new TextRun({ text: match[1], superScript: true, color: '2563EB', size: 18, font: 'Times New Roman' }));

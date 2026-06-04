@@ -19,7 +19,15 @@ export function getBatchSize(): number {
 
 // ── Prompts (provider-agnostic, stay here) ──────────────────────────────────
 
-const PRESCAN_PROMPT = `Analyze this PDF document and produce a structural outline in Markdown. Include:
+const PRESCAN_PROMPT = `Analyze this PDF document and produce a structural outline in Markdown.
+
+First, classify how the document handles reference notes by outputting a single line in EXACTLY this form (this must be the very first line of your output):
+NOTE STYLE: <footnotes|endnotes|none>
+- footnotes: numbered notes printed at the BOTTOM of the same page where their reference number appears.
+- endnotes: numbered notes gathered in a separate "Notes" section at the end of each chapter or the end of the book, away from the small reference numbers in the body text.
+- none: the document has no numbered reference notes.
+
+Then include:
 
 1. The document's page numbering scheme (e.g., "roman numerals i-xii for front matter, then arabic 1-234 for body", or "no page numbers visible").
 2. A hierarchical table of contents using Markdown headings to show the FULL nesting depth. Use up to six levels (# through ######) as needed to capture the document's actual structure:
@@ -43,6 +51,18 @@ Report only the structure that genuinely exists — never invent it:
 
 Output ONLY the outline — no content, no commentary.`;
 
+export type NoteStyle = 'footnotes' | 'endnotes' | 'none' | 'unknown';
+
+/**
+ * Read the NOTE STYLE classification the prescan emits at the top of the outline.
+ * Returns 'unknown' when absent so callers fall back to the default (footnote)
+ * behavior — never a regression for documents scanned before this field existed.
+ */
+export function parseNoteStyle(outline: string): NoteStyle {
+  const m = outline.match(/^\s*NOTE STYLE:\s*(footnotes|endnotes|none)\b/im);
+  return (m ? m[1].toLowerCase() : 'unknown') as NoteStyle;
+}
+
 function buildBatchPrompt(
   batchNum: number,
   totalBatches: number,
@@ -51,6 +71,18 @@ function buildBatchPrompt(
 ): string {
   const settings = getSettings();
   const extra = settings.outputNotes ? `\n\nCustom instructions:\n${settings.outputNotes}` : '';
+
+  // Reference-note handling depends on the prescan's NOTE STYLE classification.
+  // For endnote documents the note text is NOT on the page with its reference,
+  // so the model must emit bare [^N] anchors (printed number, may reset per
+  // chapter) and never fabricate placeholder definitions; the Notes section is
+  // transcribed as ordinary numbered text so it stays back-matter (endnotes stay
+  // endnotes, page numbers intact). Otherwise we keep the original footnote rules.
+  const noteRules = parseNoteStyle(outline) === 'endnotes'
+    ? `5. This document uses ENDNOTES: the note text is gathered in a separate "Notes" section, not on the same page as the reference. In the body, mark each note reference with [^N] using its ACTUAL printed number (a reference printed as "33" becomes [^33]). The numbering may restart at 1 in each chapter — that is fine, always use the printed number. On body pages do NOT write any note definition, and NEVER invent placeholder text such as "[footnote text not available]"; the note text is simply not on these pages.
+6. When the pages in this batch ARE part of the Notes/Endnotes section, write each note as a definition line "[^N]: note text" using its printed number (e.g. "[^33]: ..."), and keep the section's headings (e.g. "Notes", "Chapter 5"). Preserve page markers and bibliographic references exactly as written.`
+    : `5. Preserve footnotes using [^N] syntax. Use the footnote's ACTUAL printed number — a note printed as "33" becomes [^33], not [^1] — and do NOT renumber from 1. Keep each definition at the end of the section (or batch) in which its note appears, written as [^33]: ....
+6. Preserve endnotes and bibliographic references EXACTLY as written.`;
 
   const prevBlock = previousBatchHeadings.trim()
     ? `
@@ -94,8 +126,7 @@ Content rules:
 2. If the document has a table of contents, render its entries as plain text — not as headings. Only use heading syntax for actual chapter/section titles in the body.
 3. Preserve paragraph structure with blank lines between paragraphs.
 4. Convert tables to Markdown table syntax.
-5. Preserve footnotes using [^N] syntax. Use the footnote's ACTUAL printed number as the label — a note printed as "33" becomes [^33], not [^1] — and do NOT renumber from 1. Keep each definition at the end of the section (or batch) in which its note appears, written as [^33]: ....
-6. Preserve endnotes and bibliographic references EXACTLY as written.
+${noteRules}
 7. Transcribe passages in non-Latin scripts (Greek, Hebrew, Syriac, etc.) and other original-language quotations exactly as printed — do not transliterate, translate, or normalize them.
 8. Describe figures/images in [brackets], e.g. [Figure 3: Bar chart of enrollment].
 9. Fix hyphenation artifacts from PDF line-breaking.
