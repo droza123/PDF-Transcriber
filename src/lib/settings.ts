@@ -121,6 +121,12 @@ export interface AppSettings {
   autoExportFormats: ExportFormat[];
   preventSleep: boolean;
   headingCleanupEnabled: boolean;
+  /**
+   * Optional AI heading-correction stage after transcription: the scan model
+   * audits the transcribed heading structure against the prescan outline.
+   * (OCR-mode transcriptions always run this stage regardless of the flag.)
+   */
+  headingCorrectionEnabled: boolean;
   fileNaming: FileNaming;
   translationEnabled: boolean;
   translationLanguage: string;
@@ -162,6 +168,7 @@ const DEFAULTS: AppSettings = {
   autoExportFormats: ['md'],
   preventSleep: true,
   headingCleanupEnabled: true,
+  headingCorrectionEnabled: false,
   fileNaming: 'overwrite',
   translationEnabled: false,
   translationLanguage: '',

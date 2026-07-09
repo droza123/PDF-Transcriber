@@ -137,6 +137,7 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
   const [fileNaming, setFileNaming] = useState<FileNaming>('overwrite');
   const [preventSleep, setPreventSleep] = useState(false);
   const [headingCleanupEnabled, setHeadingCleanupEnabled] = useState(true);
+  const [headingCorrectionEnabled, setHeadingCorrectionEnabled] = useState(false);
   const [translationEnabled, setTranslationEnabled] = useState(false);
   const [translationLanguage, setTranslationLanguage] = useState('');
   const [translationLanguages, setTranslationLanguages] = useState<string[]>([]);
@@ -192,6 +193,7 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
       setFileNaming(s.fileNaming);
       setPreventSleep(s.preventSleep);
       setHeadingCleanupEnabled(s.headingCleanupEnabled);
+      setHeadingCorrectionEnabled(s.headingCorrectionEnabled);
       setTranslationEnabled(s.translationEnabled);
       setTranslationLanguage(s.translationLanguage);
       setTranslationLanguages(s.translationLanguages);
@@ -1375,6 +1377,18 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
             </label>
             <p className="text-xs text-p-text-dim mt-1 px-2">
               Removes duplicate headings at batch boundaries, Table-of-Contents entries mistakenly emitted as headings, and Markdown artifacts like <code>## ## Title</code>. Recommended for scholarly books.
+            </p>
+            <label className="flex items-center gap-2 px-2 py-1 mt-2 rounded-lg hover:bg-p-surface-hover cursor-pointer">
+              <input
+                type="checkbox"
+                checked={headingCorrectionEnabled}
+                onChange={(e) => { setHeadingCorrectionEnabled(e.target.checked); saveSettings({ headingCorrectionEnabled: e.target.checked }); }}
+                className="shrink-0 accent-p-accent"
+              />
+              <span className="text-sm text-p-text">AI heading correction (uses scan model)</span>
+            </label>
+            <p className="text-xs text-p-text-dim mt-1 px-2">
+              After transcription, the scan model audits the heading structure against the document outline from the structure scan — fixing wrong levels, false headings, split titles, and headings the transcription model missed. One extra text call per book; runs before translation and all exports.
             </p>
           </div>
 

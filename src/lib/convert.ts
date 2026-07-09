@@ -7,9 +7,9 @@ import {
   convertPdfBatchToMarkdown,
   batchDelay,
   extractTrailingHeadings,
-  correctOcrHeadingsWithLlm,
   parseNoteStyle,
 } from './gemini';
+import { correctHeadings, formatCorrectionStats } from './headingCorrection';
 import { cleanHeadings } from './headingCleanup';
 import { getScanProvider, getTranscribeProvider } from './providers/registry';
 
@@ -471,11 +471,15 @@ export async function convertFile(options: ConvertFileOptions): Promise<string> 
     console.log(`[convert] ${pageMsg}`);
   }
 
-  // For OCR output, use LLM to correct heading levels against the prescan outline
-  if (isOcrMode && outline) {
+  // AI heading correction against the prescan outline, run on the scan model.
+  // Always runs for OCR transcriptions (the OCR model guesses levels visually);
+  // for prompt-capable transcriptions it is the opt-in headingCorrectionEnabled
+  // stage. Runs before cleanHeadings/frontmatter, so translation and every
+  // export format downstream receive the corrected headings.
+  if (outline && (isOcrMode || getSettings().headingCorrectionEnabled)) {
     onProgress({ statusMessage: 'Correcting headings via LLM...' });
     const joined = results.join('\n\n');
-    const { correctedMarkdown, stats } = await correctOcrHeadingsWithLlm(joined, outline, {
+    const { correctedMarkdown, changed, stats, report } = await correctHeadings(joined, outline, {
       provider: scanProv,
       models: scanModels,
       abortSignal,
@@ -484,10 +488,13 @@ export async function convertFile(options: ConvertFileOptions): Promise<string> 
       onModelStart,
       onStreamProgress,
       onError,
+      onProgress: msg => onProgress({ statusMessage: msg }),
     });
-    results.length = 0;
-    results.push(correctedMarkdown);
-    const remapMsg = `Heading correction: ${stats.kept} kept, ${stats.demoted} demoted, ${stats.merged} merged (${stats.total} OCR headings)`;
+    if (changed) {
+      results.length = 0;
+      results.push(correctedMarkdown);
+    }
+    const remapMsg = formatCorrectionStats(stats, report);
     onProgress({ statusMessage: remapMsg, streamPhase: undefined, streamChars: 0 });
     console.log(`[convert] ${remapMsg}`);
   }

@@ -389,6 +389,9 @@ export default function App() {
           }
 
           let transcription: string;
+          // Prescan outline captured during conversion — persisted alongside the
+          // internal markdown so "Fix headings" can reuse it as authority later.
+          let capturedOutline = '';
 
           if (existingTranscription) {
             transcription = existingTranscription;
@@ -435,6 +438,7 @@ export default function App() {
               }
             },
             onBatchComplete: async (progress) => {
+              capturedOutline = progress.outline;
               await window.electronAPI?.saveProgress(progress);
               updateJob(jobId, { markdown: progress.results.join('\n\n') });
               addLogEntry(jobId, fileName, 'info', `Batch ${progress.completedBatches}/${progress.totalBatches} complete${lastActiveModel ? ` (${lastActiveModel})` : ''}`);
@@ -446,8 +450,12 @@ export default function App() {
             abortSignal: controller.signal,
           });
 
-            // Save transcription internally (always)
+            // Save transcription internally (always), plus the prescan outline
+            // so heading correction can reuse it from History later.
             await window.electronAPI?.saveInternalMarkdown(jobId, transcription);
+            if (capturedOutline) {
+              await window.electronAPI?.saveInternalMarkdown(`outline-${jobId}`, capturedOutline);
+            }
           }
 
           // If translating: save transcription (if new), then translate
@@ -478,6 +486,12 @@ export default function App() {
                 durationMs: Date.now() - conversionStart,
               };
               setHistory(prev => [txEntry, ...prev].sort((a, b) => b.convertedAt - a.convertedAt));
+              // The transcription history entry has its own id — store the
+              // outline (and markdown) under it too so Fix headings finds them.
+              await window.electronAPI?.saveInternalMarkdown(txEntry.id, transcription);
+              if (capturedOutline) {
+                await window.electronAPI?.saveInternalMarkdown(`outline-${txEntry.id}`, capturedOutline);
+              }
 
               addLogEntry(jobId, fileName, 'success', 'Transcription complete. Starting translation...');
             }
@@ -1064,6 +1078,7 @@ export default function App() {
             <Preview
               job={previewJob}
               onOpenMarkdown={window.electronAPI?.openMarkdownFile ? handleOpenMarkdown : undefined}
+              loadOutline={async () => (await window.electronAPI?.loadInternalMarkdown(`outline-${previewJob!.id}`)) ?? null}
             />
           ) : showHistoryPreview ? (
             <Preview
@@ -1073,6 +1088,7 @@ export default function App() {
               sourcePath={previewHistoryEntry!.sourcePath}
               onOpenMarkdown={window.electronAPI?.openMarkdownFile ? handleOpenMarkdown : undefined}
               onSaveCleaned={handleSaveCleanedHistory}
+              loadOutline={async () => (await window.electronAPI?.loadInternalMarkdown(`outline-${previewHistoryEntry!.id}`)) ?? null}
             />
           ) : (
             <div className="flex-1 flex flex-col items-center justify-center text-p-text-dim text-sm relative z-10 gap-4">
