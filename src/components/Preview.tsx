@@ -2,10 +2,15 @@ import { useState, useEffect, useCallback, useRef, useMemo, memo, startTransitio
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
-import { Copy, Check, Download, FolderOpen, Hash, Table2, BookOpen, Footprints, Search, X, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Columns2, FileText, Loader2, Radio, ListTree, Sparkles, RotateCcw, Save } from 'lucide-react';
+import { Copy, Check, Download, FolderOpen, Hash, Table2, BookOpen, Footprints, Search, X, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Columns2, FileText, Loader2, Radio, ListTree, Sparkles, RotateCcw, Save, Wand2 } from 'lucide-react';
 import type { ConversionJob } from '../types';
 import { downloadMarkdown, showInFolder, exportAsHtml, exportAsJson, exportAsDocx } from '../lib/download';
 import { cleanHeadings, forEachHeading, changeHeadingLevels } from '../lib/headingCleanup';
+import { correctHeadings, formatCorrectionStats } from '../lib/headingCorrection';
+import { extractDocumentOutline } from '../lib/gemini';
+import { getScanProvider } from '../lib/providers/registry';
+import { getScanModelPriority, getSettings } from '../lib/settings';
+import { getApiKey } from '../lib/apiKey';
 import { footnoteComponents, endnotesToPlainMarkdown } from '../lib/markdownFootnotes';
 
 interface PreviewProps {
@@ -22,6 +27,12 @@ interface PreviewProps {
    * (Save button hidden).
    */
   onSaveCleaned?: (content: string) => Promise<void> | void;
+  /**
+   * Load the stored prescan outline for the previewed document (heading
+   * correction authority). Return null when none exists — the user is then
+   * offered to attach the source PDF or continue without an outline.
+   */
+  loadOutline?: () => Promise<string | null>;
 }
 
 const INITIAL_CHUNKS = 10;
@@ -81,7 +92,7 @@ const MarkdownChunk = memo(function MarkdownChunk({ content, startHeadingIndex }
   );
 });
 
-export default function Preview({ job, markdown: externalMd, fileName: externalName, savedPath: externalSavedPath, sourcePath: externalSourcePath, onOpenMarkdown, onSaveCleaned }: PreviewProps) {
+export default function Preview({ job, markdown: externalMd, fileName: externalName, savedPath: externalSavedPath, sourcePath: externalSourcePath, onOpenMarkdown, onSaveCleaned, loadOutline }: PreviewProps) {
   const [tab, setTab] = useState<'raw' | 'rendered'>('rendered');
   const [copied, setCopied] = useState(false);
   const [sideBySide, setSideBySide] = useState(false);
@@ -150,6 +161,12 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
   const [cleanedOverride, setCleanedOverride] = useState<string | null>(null);
   const [cleanStats, setCleanStats] = useState<{ headingsBefore: number; headingsAfter: number; linesRemoved: number } | null>(null);
   const [savingCleaned, setSavingCleaned] = useState(false);
+  // AI heading correction (scan model) state
+  const [fixBusy, setFixBusy] = useState(false);
+  const [fixStatus, setFixStatus] = useState<string | null>(null);
+  const [fixMessage, setFixMessage] = useState<string | null>(null);
+  const [fixMenuOpen, setFixMenuOpen] = useState(false);
+  const pdfInputRef = useRef<HTMLInputElement>(null);
   // Heading-level editing state
   const [selectedHeadings, setSelectedHeadings] = useState<Set<number>>(new Set());
   const [lastSelectedIndex, setLastSelectedIndex] = useState<number | null>(null);
@@ -172,6 +189,8 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
     }
     setCleanedOverride(null);
     setCleanStats(null);
+    setFixMessage(null);
+    setFixMenuOpen(false);
     setHeadingEditMode(false);
     setSelectedHeadings(new Set());
     setLastSelectedIndex(null);
@@ -309,6 +328,7 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
   const headingCount = (s: string) => (s.match(/^#{1,6}\s+\S/gm) || []).length;
   function handleCleanHeadings() {
     const source = cleanedOverride ?? baseMd;
+    setFixMessage(null);
     const cleaned = cleanHeadings(source);
     if (cleaned === source) {
       // Nothing changed — surface that visibly.
@@ -325,6 +345,69 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
     });
   }
 
+  // ── AI heading correction (scan model) ──────────────────────────────────
+  // Stages the corrected markdown as an override, exactly like the local
+  // heading-cleanup pass — nothing persists until the user clicks Save.
+
+  const scanKeyAvailable = !!getApiKey(getSettings().scanProvider);
+
+  async function runAiFix(outline: string | null) {
+    const source = cleanedOverride ?? baseMd;
+    setFixMenuOpen(false);
+    setFixBusy(true);
+    setFixStatus('Correcting headings...');
+    try {
+      const result = await correctHeadings(source, outline, {
+        provider: getScanProvider(),
+        models: getScanModelPriority(),
+        onProgress: msg => setFixStatus(msg),
+      });
+      setCleanedOverride(result.correctedMarkdown);
+      setCleanStats(null);
+      setHeadingEditMode(false);
+      setFixMessage(
+        formatCorrectionStats(result.stats, result.report)
+        + (outline ? '' : ' (no outline — structure derived from the document itself)'),
+      );
+    } catch (e: any) {
+      setFixMessage(`Heading correction failed: ${e.message}`);
+    } finally {
+      setFixBusy(false);
+      setFixStatus(null);
+    }
+  }
+
+  async function handleFixHeadings() {
+    if (fixBusy) return;
+    const outline = loadOutline ? await loadOutline() : null;
+    if (outline && outline.trim()) {
+      await runAiFix(outline);
+    } else {
+      // No stored outline — let the user attach the source PDF or continue without.
+      setFixMenuOpen(v => !v);
+    }
+  }
+
+  async function handleAttachPdf(file: File) {
+    setFixMenuOpen(false);
+    setFixBusy(true);
+    setFixStatus('Scanning PDF structure...');
+    try {
+      const blob = new Blob([await file.arrayBuffer()], { type: 'application/pdf' });
+      const result = await extractDocumentOutline(
+        blob,
+        undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+        getScanProvider(),
+        getScanModelPriority(),
+      );
+      await runAiFix(result.text);
+    } catch (e: any) {
+      setFixMessage(`Structure scan failed: ${e.message}`);
+      setFixBusy(false);
+      setFixStatus(null);
+    }
+  }
+
   async function handleSaveCleaned() {
     if (!cleanedOverride || !onSaveCleaned) return;
     try {
@@ -339,6 +422,7 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
   function handleRevertCleaned() {
     setCleanedOverride(null);
     setCleanStats(null);
+    setFixMessage(null);
     setHeadingEditMode(false);
     setSelectedHeadings(new Set());
   }
@@ -738,6 +822,57 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
             <Sparkles className="w-3 h-3" />
             Clean headings
           </button>
+          <div className="relative">
+            <button
+              onClick={handleFixHeadings}
+              className="btn-ghost"
+              title={
+                !scanKeyAvailable
+                  ? 'Requires an API key for the scan provider'
+                  : fixStatus ?? 'AI heading correction: the scan model audits levels, false headings, split titles, and missing headings against the document outline'
+              }
+              disabled={!baseMd || fixBusy || job?.status === 'converting' || !scanKeyAvailable}
+            >
+              {fixBusy ? <Loader2 className="w-3 h-3 animate-spin" /> : <Wand2 className="w-3 h-3" />}
+              {fixBusy ? 'Fixing...' : 'Fix headings (AI)'}
+            </button>
+            {fixMenuOpen && (
+              <div className="absolute left-0 top-full mt-1 z-30 w-64 p-1.5 rounded-lg border border-p-border bg-p-bg shadow-lg">
+                <p className="px-2 py-1 text-[11px] text-p-text-dim">
+                  No stored outline for this document. An outline from the source PDF makes correction much more reliable.
+                </p>
+                <button
+                  onClick={() => pdfInputRef.current?.click()}
+                  className="w-full text-left px-2 py-1.5 text-xs rounded hover:bg-p-surface-hover text-p-text"
+                >
+                  Attach source PDF (scan structure)...
+                </button>
+                <button
+                  onClick={() => runAiFix(null)}
+                  className="w-full text-left px-2 py-1.5 text-xs rounded hover:bg-p-surface-hover text-p-text"
+                >
+                  Continue without outline
+                </button>
+                <button
+                  onClick={() => setFixMenuOpen(false)}
+                  className="w-full text-left px-2 py-1.5 text-xs rounded hover:bg-p-surface-hover text-p-text-dim"
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
+            <input
+              ref={pdfInputRef}
+              type="file"
+              accept="application/pdf"
+              className="hidden"
+              onChange={e => {
+                const f = e.target.files?.[0];
+                if (f) handleAttachPdf(f);
+                e.target.value = '';
+              }}
+            />
+          </div>
           <button
             onClick={() => { setFindOpen(true); setTimeout(() => findInputRef.current?.focus(), 50); }}
             className="btn-ghost"
@@ -871,16 +1006,18 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
         <span className="ml-auto">{(md.length / 1024).toFixed(1)} KB</span>
       </div>
 
-      {/* Heading cleanup banner */}
-      {cleanStats && (
+      {/* Heading cleanup / AI correction banner */}
+      {(cleanStats || fixMessage) && (
         <div className="flex items-center gap-3 px-4 py-2 border-b border-p-accent/20 bg-p-accent/5 shrink-0">
-          <Sparkles className="w-3.5 h-3.5 text-p-accent shrink-0" />
+          {fixMessage ? <Wand2 className="w-3.5 h-3.5 text-p-accent shrink-0" /> : <Sparkles className="w-3.5 h-3.5 text-p-accent shrink-0" />}
           <span className="text-xs text-p-text">
-            {cleanStats.headingsBefore === cleanStats.headingsAfter && cleanStats.linesRemoved === 0
+            {fixMessage
+              ? fixMessage
+              : cleanStats!.headingsBefore === cleanStats!.headingsAfter && cleanStats!.linesRemoved === 0
               ? <span className="text-p-text-dim">No heading issues found — markdown is already clean.</span>
               : <>
-                  Cleaned <strong>{cleanStats.headingsBefore - cleanStats.headingsAfter}</strong> heading{cleanStats.headingsBefore - cleanStats.headingsAfter === 1 ? '' : 's'}
-                  {cleanStats.linesRemoved > 0 && <> &middot; removed <strong>{cleanStats.linesRemoved}</strong> line{cleanStats.linesRemoved === 1 ? '' : 's'}</>}
+                  Cleaned <strong>{cleanStats!.headingsBefore - cleanStats!.headingsAfter}</strong> heading{cleanStats!.headingsBefore - cleanStats!.headingsAfter === 1 ? '' : 's'}
+                  {cleanStats!.linesRemoved > 0 && <> &middot; removed <strong>{cleanStats!.linesRemoved}</strong> line{cleanStats!.linesRemoved === 1 ? '' : 's'}</>}
                 </>}
           </span>
           <div className="ml-auto flex items-center gap-1.5">
@@ -908,7 +1045,7 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
       )}
 
       {/* Heading-level edit banner */}
-      {headingEditMode && !cleanStats && (
+      {headingEditMode && !cleanStats && !fixMessage && (
         <div className="flex items-center gap-3 px-4 py-2 border-b border-p-accent/20 bg-p-accent/5 shrink-0">
           <ListTree className="w-3.5 h-3.5 text-p-accent shrink-0" />
           <span className="text-xs text-p-text">
