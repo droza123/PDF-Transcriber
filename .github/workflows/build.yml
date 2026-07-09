@@ -19,9 +19,28 @@ jobs:
           node-version: 20
           cache: npm
 
-      - run: npm ci
+      # Retry loops guard against transient 504s from GitHub's release CDN
+      # (electron zip, NSIS, winCodeSign downloads all come from there).
+      - name: Install dependencies
+        shell: bash
+        run: |
+          for i in 1 2 3; do
+            npm ci && exit 0
+            echo "npm ci attempt $i failed — retrying in 30s..."
+            sleep 30
+          done
+          exit 1
 
-      - run: npx vite build && npx electron-builder --win --publish never
+      - name: Build installer
+        shell: bash
+        run: |
+          npx vite build
+          for i in 1 2 3; do
+            npx electron-builder --win --publish never && exit 0
+            echo "electron-builder attempt $i failed — retrying in 60s..."
+            sleep 60
+          done
+          exit 1
 
       - uses: actions/upload-artifact@v4
         with:
@@ -38,9 +57,26 @@ jobs:
           node-version: 20
           cache: npm
 
-      - run: npm ci
+      - name: Install dependencies
+        shell: bash
+        run: |
+          for i in 1 2 3; do
+            npm ci && exit 0
+            echo "npm ci attempt $i failed — retrying in 30s..."
+            sleep 30
+          done
+          exit 1
 
-      - run: npx vite build && npx electron-builder --mac --publish never
+      - name: Build installer
+        shell: bash
+        run: |
+          npx vite build
+          for i in 1 2 3; do
+            npx electron-builder --mac --publish never && exit 0
+            echo "electron-builder attempt $i failed — retrying in 60s..."
+            sleep 60
+          done
+          exit 1
 
       - uses: actions/upload-artifact@v4
         with:
