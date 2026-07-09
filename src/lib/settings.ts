@@ -5,6 +5,9 @@ export type FileNaming = 'overwrite' | 'unique';
 /** How the Custom provider sends PDFs to the API. */
 export type CustomPdfMode = 'images' | 'pdf';
 
+/** Pipeline stages that can carry their own model priority override. */
+export type PipelineStage = 'scan' | 'transcribe' | 'translate';
+
 export const DEFAULT_TRANSLATION_LANGUAGES = [
   'English', 'Spanish', 'French', 'German', 'Portuguese', 'Italian',
   'Chinese (Simplified)', 'Japanese', 'Korean', 'Arabic', 'Russian',
@@ -106,6 +109,12 @@ export interface AppSettings {
   /** Provider used for markdown translation. */
   translateProvider: ProviderId;
   providerModelPriority: Record<ProviderId, string[]>;
+  /**
+   * Optional per-stage model priority overrides. When
+   * stageModelPriority[stage][provider] exists (non-empty), it is used for
+   * that stage instead of providerModelPriority[provider].
+   */
+  stageModelPriority: Partial<Record<PipelineStage, Partial<Record<ProviderId, string[]>>>>;
   openrouterAutoFreeModels: boolean;
   batchSize: number;
   outputNotes: string;
@@ -146,6 +155,7 @@ const DEFAULTS: AppSettings = {
     mistral: [...DEFAULT_MISTRAL_MODELS],
     custom: [],
   },
+  stageModelPriority: {},
   openrouterAutoFreeModels: true,
   batchSize: 5,
   outputNotes: '',
@@ -269,29 +279,33 @@ export function getPrimaryModel(): string {
 
 // ── Role-based model priority getters ─────────────────────────────────────
 
-function modelPriorityFor(provider: ProviderId): string[] {
-  const { providerModelPriority } = getSettings();
-  const priority = providerModelPriority[provider];
+function modelPriorityFor(provider: ProviderId, stage?: PipelineStage): string[] {
+  const settings = getSettings();
+  if (stage) {
+    const override = settings.stageModelPriority?.[stage]?.[provider];
+    if (override && override.length > 0) return override;
+  }
+  const priority = settings.providerModelPriority[provider];
   if (priority && priority.length > 0) return priority;
   return PROVIDER_DEFAULT_MODELS[provider] || [];
 }
 
 export function getScanModelPriority(): string[] {
-  return modelPriorityFor(getSettings().scanProvider);
+  return modelPriorityFor(getSettings().scanProvider, 'scan');
 }
 export function getScanPrimaryModel(): string {
   return getScanModelPriority()[0] ?? '';
 }
 
 export function getTranscribeModelPriority(): string[] {
-  return modelPriorityFor(getSettings().transcribeProvider);
+  return modelPriorityFor(getSettings().transcribeProvider, 'transcribe');
 }
 export function getTranscribePrimaryModel(): string {
   return getTranscribeModelPriority()[0] ?? '';
 }
 
 export function getTranslateModelPriority(): string[] {
-  return modelPriorityFor(getSettings().translateProvider);
+  return modelPriorityFor(getSettings().translateProvider, 'translate');
 }
 export function getTranslatePrimaryModel(): string {
   return getTranslateModelPriority()[0] ?? '';

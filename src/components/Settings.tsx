@@ -3,7 +3,7 @@ import { X, GripVertical, RefreshCw, Info, Eye, EyeOff, Trash2, ExternalLink, Lo
 import { DndContext, closestCenter, type DragEndEvent } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { getSettings, saveSettings, initializeModelPriority, PROVIDER_DEFAULT_MODELS, DEFAULT_TRANSLATION_LANGUAGES, getSessionSkippedModels, CUSTOM_PRESETS, type ExportFormat, type FileNaming, type CustomConfig, type CustomPdfMode } from '../lib/settings';
+import { getSettings, saveSettings, initializeModelPriority, PROVIDER_DEFAULT_MODELS, DEFAULT_TRANSLATION_LANGUAGES, getSessionSkippedModels, CUSTOM_PRESETS, type ExportFormat, type FileNaming, type CustomConfig, type CustomPdfMode, type PipelineStage, type AppSettings } from '../lib/settings';
 import { getCachedModels, getApiKey, setApiKey, clearApiKey, hasApiKey, validateAndFetchModels, getCustomConfigApiKey, setCustomConfigApiKey, clearCustomConfigApiKey } from '../lib/apiKey';
 import { getAllProviders, getProvider } from '../lib/providers/registry';
 import type { ProviderId, ProviderModel } from '../lib/providers/types';
@@ -128,6 +128,9 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
   const [settingsTab, setSettingsTab] = useState<SettingsTab>('provider');
   const [selectedProvider, setSelectedProvider] = useState<ProviderId>('gemini');
   const [modelPriority, setModelPriority] = useState<string[]>([]);
+  // Per-stage model priority overrides
+  const [editStage, setEditStage] = useState<PipelineStage>('transcribe');
+  const [stageOverrides, setStageOverrides] = useState<AppSettings['stageModelPriority']>({});
   const [batchSize, setBatchSize] = useState(10);
   const [outputNotes, setOutputNotes] = useState('');
   const [autoExportFormats, setAutoExportFormats] = useState<ExportFormat[]>(['md']);
@@ -177,7 +180,12 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
       setTranslateProviderState(s.translateProvider || s.activeProvider);
       const provider = initialProvider || s.transcribeProvider || s.activeProvider;
       setSelectedProvider(provider);
-      setModelPriority(s.providerModelPriority[provider] || []);
+      setEditStage('transcribe');
+      setStageOverrides(s.stageModelPriority ?? {});
+      setModelPriority(
+        s.stageModelPriority?.transcribe?.[provider]
+        ?? s.providerModelPriority[provider] ?? []
+      );
       setBatchSize(s.batchSize);
       setOutputNotes(s.outputNotes);
       setAutoExportFormats(s.autoExportFormats);
@@ -279,7 +287,7 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
       setCustomBaseUrl(s.customBaseUrl || 'http://localhost:11434/v1');
       const models = s.customModels || [];
       setCustomModels(models);
-      setModelPriority(s.providerModelPriority.custom || []);
+      setModelPriority(s.stageModelPriority?.[editStage]?.custom ?? s.providerModelPriority.custom ?? []);
       setCustomConnected(models.length > 0);
       setCustomPdfMode(s.customPdfMode || 'images');
     } else {
@@ -293,9 +301,9 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
 
       if (saved) {
         setCustomModels(saved.models);
-        setModelPriority(saved.models);
         const settings = getSettings();
         saveSettings({ providerModelPriority: { ...settings.providerModelPriority, custom: saved.models } });
+        setModelPriority(settings.stageModelPriority?.[editStage]?.custom ?? saved.models);
         setCustomConnected(saved.models.length > 0);
       } else {
         // Built-in preset — keep existing models or empty
@@ -363,12 +371,12 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
 
   function handleProviderChange(id: ProviderId) {
     // Save current model priority for the old provider (config tab only — no longer sets activeProvider)
-    const settings = getSettings();
-    const updatedPriority = { ...settings.providerModelPriority, [selectedProvider]: modelPriority };
-    saveSettings({ providerModelPriority: updatedPriority });
+    persistModelPriority(modelPriority);
 
     setSelectedProvider(id);
-    const newPriority = updatedPriority[id] || PROVIDER_DEFAULT_MODELS[id] || [];
+    const s = getSettings();
+    const newPriority = s.stageModelPriority?.[editStage]?.[id]
+      ?? s.providerModelPriority[id] ?? PROVIDER_DEFAULT_MODELS[id] ?? [];
     setModelPriority(newPriority);
     setCachedModels(getCachedModels(id));
     // Reset key editing state on provider switch
@@ -405,11 +413,12 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
       const orProvider = getProvider('openrouter') as OpenRouterProvider;
       const topFree = await orProvider.getTopFreeModels(key);
       if (topFree.length > 0) {
-        setModelPriority(topFree);
         setOpenrouterModelData(orProvider._getCachedModels());
         setCachedModels(topFree);
         const settings = getSettings();
         saveSettings({ providerModelPriority: { ...settings.providerModelPriority, openrouter: topFree } });
+        // Auto-free manages the shared list only — keep showing a stage override if active
+        setModelPriority(settings.stageModelPriority?.[editStage]?.openrouter ?? topFree);
       }
       setRefreshing(false);
     }
@@ -437,9 +446,12 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
       if (result.models.length > 0) {
         initializeModelPriority(selectedProvider, result.models);
         setCachedModels(result.models);
-        // Refresh model priority from what was just initialized
+        // Refresh model priority from what was just initialized (stage override wins)
         const s = getSettings();
-        setModelPriority(s.providerModelPriority[selectedProvider] || result.models.slice(0, 5));
+        setModelPriority(
+          s.stageModelPriority?.[editStage]?.[selectedProvider]
+          ?? s.providerModelPriority[selectedProvider] ?? result.models.slice(0, 5)
+        );
       }
       setTimeout(() => setValidationResult(null), 3000);
     } else {
@@ -465,10 +477,19 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
       const next = prev.filter(m => m !== model);
       const nextCustom = customModels.filter(m => m !== model);
       setCustomModels(nextCustom);
+      // Catalog deletion: strip the model from the shared list and every stage override.
       const settings = getSettings();
+      const sharedNext = (settings.providerModelPriority.custom || []).filter(m => m !== model);
+      const stageNext = { ...settings.stageModelPriority };
+      for (const stage of Object.keys(stageNext) as PipelineStage[]) {
+        const list = stageNext[stage]?.custom;
+        if (list) stageNext[stage] = { ...stageNext[stage], custom: list.filter(m => m !== model) };
+      }
+      setStageOverrides(stageNext);
       saveSettings({
         customModels: nextCustom,
-        providerModelPriority: { ...settings.providerModelPriority, custom: next },
+        providerModelPriority: { ...settings.providerModelPriority, custom: sharedNext },
+        stageModelPriority: stageNext,
       });
       return next;
     });
@@ -492,6 +513,7 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
   if (!open) return null;
 
   const defaultModels = PROVIDER_DEFAULT_MODELS[selectedProvider] || [];
+  const overrideActive = !!stageOverrides?.[editStage]?.[selectedProvider];
   const availableModels = cachedModels.length > 0 ? cachedModels : defaultModels;
   // Include any models from priority that aren't in the available list (e.g. deprecated)
   const allModels = [...new Set([...modelPriority, ...availableModels])];
@@ -505,6 +527,50 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
       })
     : unselected;
 
+  /**
+   * Persist an edited model list to the right place: the active stage
+   * override when one exists for (editStage, selectedProvider), otherwise
+   * the shared per-provider list.
+   */
+  function persistModelPriority(next: string[]) {
+    const s = getSettings();
+    if (s.stageModelPriority?.[editStage]?.[selectedProvider]) {
+      const updated = {
+        ...s.stageModelPriority,
+        [editStage]: { ...s.stageModelPriority[editStage], [selectedProvider]: next },
+      };
+      setStageOverrides(updated);
+      saveSettings({ stageModelPriority: updated });
+    } else {
+      saveSettings({ providerModelPriority: { ...s.providerModelPriority, [selectedProvider]: next } });
+    }
+  }
+
+  function handleStageChange(stage: PipelineStage) {
+    setEditStage(stage);
+    const s = getSettings();
+    setModelPriority(
+      s.stageModelPriority?.[stage]?.[selectedProvider]
+      ?? s.providerModelPriority[selectedProvider] ?? []
+    );
+  }
+
+  function handleStageOverrideToggle(enabled: boolean) {
+    const s = getSettings();
+    const stageMap = { ...(s.stageModelPriority?.[editStage] ?? {}) };
+    if (enabled) {
+      stageMap[selectedProvider] = [...modelPriority]; // seed with copy of current list
+    } else {
+      delete stageMap[selectedProvider]; // fall back to shared list
+    }
+    const updated = { ...s.stageModelPriority, [editStage]: stageMap };
+    setStageOverrides(updated);
+    saveSettings({ stageModelPriority: updated });
+    if (!enabled) {
+      setModelPriority(s.providerModelPriority[selectedProvider] ?? PROVIDER_DEFAULT_MODELS[selectedProvider] ?? []);
+    }
+  }
+
   function toggleModel(model: string) {
     setModelPriority(prev => {
       let next: string[];
@@ -514,14 +580,13 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
       } else {
         next = [...prev, model];
       }
-      const settings = getSettings();
-      const save: Partial<typeof settings> = { providerModelPriority: { ...settings.providerModelPriority, [selectedProvider]: next } };
-      if (selectedProvider === 'custom') {
-        const nextCustom = next;
-        setCustomModels(nextCustom);
-        save.customModels = nextCustom;
+      // The custom model catalog only follows edits to the shared list — a
+      // stage-only removal must not shrink the catalog.
+      if (selectedProvider === 'custom' && !overrideActive) {
+        setCustomModels(next);
+        saveSettings({ customModels: next });
       }
-      saveSettings(save);
+      persistModelPriority(next);
       return next;
     });
   }
@@ -536,8 +601,7 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
         const updated = [...prev];
         const [moved] = updated.splice(oldIndex, 1);
         updated.splice(newIndex, 0, moved);
-        const settings = getSettings();
-        saveSettings({ providerModelPriority: { ...settings.providerModelPriority, [selectedProvider]: updated } });
+        persistModelPriority(updated);
         return updated;
       });
     }
@@ -1012,6 +1076,46 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
                 {refreshing ? 'Refreshing...' : 'Refresh'}
               </button>
             </div>
+
+            {/* Per-stage model priority */}
+            <div className="flex gap-1.5 mb-2">
+              {([['scan', 'Scan'], ['transcribe', 'Transcribe'], ['translate', 'Translate']] as [PipelineStage, string][]).map(([stage, label]) => {
+                const hasOverride = !!stageOverrides?.[stage]?.[selectedProvider];
+                return (
+                  <button
+                    key={stage}
+                    onClick={() => handleStageChange(stage)}
+                    className={`flex-1 px-2.5 py-1.5 text-xs rounded-lg border tab-transition relative ${
+                      editStage === stage
+                        ? 'border-p-accent bg-p-accent/8 text-p-accent font-medium'
+                        : 'border-p-border bg-p-bg text-p-text-muted hover:text-p-text hover:border-p-accent/40'
+                    }`}
+                  >
+                    {label}
+                    {hasOverride && (
+                      <span
+                        className="absolute -top-1 -right-1 w-1.5 h-1.5 rounded-full bg-p-accent"
+                        title="Custom model list for this stage"
+                      />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+            <label className="flex items-center gap-2 px-2 py-1 mb-1 rounded-lg hover:bg-p-surface-hover cursor-pointer">
+              <input
+                type="checkbox"
+                checked={overrideActive}
+                onChange={e => handleStageOverrideToggle(e.target.checked)}
+                className="shrink-0 accent-p-accent"
+              />
+              <span className="text-xs text-p-text">Customize models for this stage</span>
+            </label>
+            <p className="text-[10px] text-p-text-dim/60 px-2 mb-1.5">
+              {overrideActive
+                ? `Custom list for ${editStage} with this provider. Other stages keep the shared list.`
+                : 'Editing the shared list — used by every stage without a custom list.'}
+            </p>
 
             {/* OpenRouter-specific controls */}
             {selectedProvider === 'openrouter' && (

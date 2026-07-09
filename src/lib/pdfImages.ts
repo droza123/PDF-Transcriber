@@ -29,7 +29,7 @@ export async function pdfToImages(pdfBlob: Blob, scale = 2): Promise<string[]> {
     canvas.height = viewport.height;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    await page.render({ canvasContext: ctx, viewport }).promise;
+    await page.render({ canvas, viewport }).promise;
     dataUrls.push(canvas.toDataURL('image/png'));
   }
 
