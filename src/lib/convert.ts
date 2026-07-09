@@ -250,7 +250,9 @@ export async function convertFile(options: ConvertFileOptions): Promise<string> 
   const BATCH_SIZE = getBatchSize();
 
   // In-memory set of models to skip — accumulates across batches within this job only.
-  // Never persisted; garbage-collected when the job finishes.
+  // Never persisted; garbage-collected when the job finishes. Intentionally shared
+  // across scan and transcribe even when their stage model lists differ: skips are
+  // keyed by model id, and a model that fails in one stage will fail in the other.
   const skipModels = new Set<string>();
 
   const onModelSkip = (skippedModel: string, nextModel: string | null, reason: string) => {
