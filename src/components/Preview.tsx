@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, useMemo, memo, startTransition } from 'react';
+import { useState, useEffect, useLayoutEffect, useCallback, useRef, useMemo, memo, startTransition } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
@@ -45,6 +45,15 @@ interface PreviewProps {
 
 const INITIAL_CHUNKS = 10;
 const CHUNKS_PER_LOAD = 10;
+const CONTEXT_MENU_MARGIN = 12;
+
+interface HeadingContextMenuState {
+  x: number;
+  y: number;
+  text: string;
+  headingIndex: number | null;
+  currentLevel: number | null;
+}
 
 /** Allow data: URIs (for embedded OCR images) alongside the default safe protocols. */
 function urlTransform(url: string): string {
@@ -124,7 +133,8 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
   const outlineDraggingRef = useRef(false);
   const findInputRef = useRef<HTMLInputElement>(null);
   // Context menu for heading assignment
-  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; text: string } | null>(null);
+  const [ctxMenu, setCtxMenu] = useState<HeadingContextMenuState | null>(null);
+  const contextMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     localStorage.setItem('outline_open', outlineOpen ? '1' : '0');
@@ -506,34 +516,50 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
   // ── Context menu: right-click to set heading level ────────────────────────
 
   function handleContextMenu(e: React.MouseEvent) {
-    const sel = window.getSelection();
-    const text = sel?.toString().trim();
-    if (!text || text.includes('\n')) return; // only single-line selections
+    const target = e.target as HTMLElement;
+    const renderedHeading = target.closest<HTMLElement>('[id^="md-heading-"]');
+    const currentMd = normalizeExtendedHeadingSyntax(cleanedOverride ?? baseMd);
+    const headings = collectHeadings(currentMd);
+
+    let text = '';
+    let headingIndex: number | null = null;
+    let currentLevel: number | null = null;
+
+    if (renderedHeading) {
+      const parsedIndex = Number(renderedHeading.id.replace('md-heading-', ''));
+      const heading = Number.isInteger(parsedIndex) ? headings[parsedIndex] : undefined;
+      if (!heading) return;
+      headingIndex = parsedIndex;
+      currentLevel = heading.level;
+      text = renderedHeading.textContent?.trim() || heading.text;
+    } else {
+      const selection = window.getSelection();
+      const selectionNode = selection?.anchorNode;
+      text = selection?.toString().trim() || '';
+      if (!selectionNode || !e.currentTarget.contains(selectionNode) || !text || text.includes('\n')) {
+        setCtxMenu(null);
+        return;
+      }
+    }
+
     e.preventDefault();
-    setCtxMenu({ x: e.clientX, y: e.clientY, text });
+    setCtxMenu({ x: e.clientX, y: e.clientY, text, headingIndex, currentLevel });
   }
 
   function applyHeadingFromContextMenu(level: number | null) {
     if (!ctxMenu) return;
     const currentMd = normalizeExtendedHeadingSyntax(cleanedOverride ?? baseMd);
     const selectedText = ctxMenu.text;
-    setCtxMenu(null);
-
-    const plainLabel = (value: string) => value
-      .replace(/`([^`]+)`/g, '$1')
-      .replace(/\*\*([^*]+)\*\*/g, '$1')
-      .replace(/\*([^*]+)\*/g, '$1')
-      .replace(/_([^_]+)_/g, '$1')
-      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
-      .trim();
     const headings = collectHeadings(currentMd);
-    const headingIndex = headings.findIndex(h => plainLabel(h.text) === selectedText);
+    setCtxMenu(null);
     let newMd: string | null = null;
 
-    if (headingIndex >= 0) {
+    if (ctxMenu.headingIndex !== null) {
+      const headingIndex = ctxMenu.headingIndex;
+      const heading = headings[headingIndex];
+      if (!heading) return;
       if (level === null) {
         const lines = currentMd.split('\n');
-        const heading = headings[headingIndex];
         lines.splice(
           heading.startLineIndex,
           heading.lineIndex - heading.startLineIndex + 1,
@@ -544,6 +570,7 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
         newMd = changeHeadingLevels(currentMd, new Map([[headingIndex, level]]));
       }
     } else {
+      if (level === null) return;
       const lines = currentMd.split('\n');
       const matchIdx = lines.findIndex(line => {
         const stripped = line.replace(/^#{1,9}\s+/, '').replace(/^\*\*(.+)\*\*$/, '$1').trim();
@@ -551,8 +578,7 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
       });
       if (matchIdx < 0) return;
       const bareText = lines[matchIdx].replace(/^#{1,9}\s+/, '').replace(/^\*\*(.+)\*\*$/, '$1').trim();
-      const replacement = level === null ? [bareText] : serializeHeading(level, bareText).split('\n');
-      lines.splice(matchIdx, 1, ...replacement);
+      lines.splice(matchIdx, 1, ...serializeHeading(level, bareText).split('\n'));
       newMd = lines.join('\n');
     }
 
@@ -563,13 +589,60 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
     debouncedAutoSave(newMd);
   }
 
-  // Close context menu on click elsewhere
+  // Close the menu when focus moves elsewhere or its viewport anchor changes.
   useEffect(() => {
     if (!ctxMenu) return;
     const close = () => setCtxMenu(null);
+    const closeOnScroll = (event: Event) => {
+      if (contextMenuRef.current?.contains(event.target as Node)) return;
+      close();
+    };
     window.addEventListener('click', close);
-    return () => window.removeEventListener('click', close);
+    window.addEventListener('resize', close);
+    window.addEventListener('scroll', closeOnScroll, true);
+    return () => {
+      window.removeEventListener('click', close);
+      window.removeEventListener('resize', close);
+      window.removeEventListener('scroll', closeOnScroll, true);
+    };
   }, [ctxMenu]);
+
+  // Fit the custom menu to the viewport, then focus the current level (or H1).
+  useLayoutEffect(() => {
+    if (!ctxMenu || !contextMenuRef.current) return;
+    const menu = contextMenuRef.current;
+    const rect = menu.getBoundingClientRect();
+    const x = Math.max(CONTEXT_MENU_MARGIN, Math.min(ctxMenu.x, window.innerWidth - rect.width - CONTEXT_MENU_MARGIN));
+    const y = Math.max(CONTEXT_MENU_MARGIN, Math.min(ctxMenu.y, window.innerHeight - rect.height - CONTEXT_MENU_MARGIN));
+    if (x !== ctxMenu.x || y !== ctxMenu.y) {
+      setCtxMenu(current => current ? { ...current, x, y } : current);
+      return;
+    }
+    const preferred = menu.querySelector<HTMLButtonElement>('[aria-checked="true"]')
+      ?? menu.querySelector<HTMLButtonElement>('[role="menuitemradio"]');
+    preferred?.focus({ preventScroll: true });
+  }, [ctxMenu]);
+
+  function handleContextMenuKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      setCtxMenu(null);
+      return;
+    }
+    if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) return;
+    const items = Array.from(contextMenuRef.current?.querySelectorAll<HTMLButtonElement>('[role^="menuitem"]') ?? []);
+    if (items.length === 0) return;
+    e.preventDefault();
+    const current = items.indexOf(document.activeElement as HTMLButtonElement);
+    const next = e.key === 'Home'
+      ? 0
+      : e.key === 'End'
+        ? items.length - 1
+        : e.key === 'ArrowDown'
+          ? (current + 1) % items.length
+          : (current <= 0 ? items.length : current) - 1;
+    items[next].focus();
+  }
 
   // Scroll to a heading by its document-order index. Forces rendered tab and
   // loads enough chunks for the target heading to be in the DOM.
@@ -1244,30 +1317,78 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
       {/* Heading-level context menu */}
       {ctxMenu && (
         <div
-          className="fixed z-[60] bg-p-bg border border-p-border rounded-lg shadow-2xl py-1 min-w-[160px]"
+          ref={contextMenuRef}
+          role="menu"
+          aria-label={ctxMenu.currentLevel ? 'Change heading level' : 'Assign heading level'}
+          className="fixed z-[60] w-72 max-h-[calc(100vh-24px)] overflow-y-auto rounded-xl border border-p-border bg-p-surface-raised shadow-2xl p-1.5 outline-none"
           style={{ left: ctxMenu.x, top: ctxMenu.y }}
           onClick={e => e.stopPropagation()}
+          onKeyDown={handleContextMenuKeyDown}
         >
-          <div className="px-3 py-1.5 text-[10px] text-p-text-dim border-b border-p-border-subtle truncate max-w-[220px]">
-            {ctxMenu.text}
+          <div className="px-2.5 pt-2 pb-2.5 border-b border-p-border-subtle">
+            <div className="mb-1.5 flex items-center justify-between gap-3">
+              <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-p-text-dim">
+                Heading level
+              </span>
+              <span className={[
+                'shrink-0 rounded-full px-2 py-0.5 font-mono text-[10px] font-semibold',
+                ctxMenu.currentLevel
+                  ? 'bg-p-accent/15 text-p-accent ring-1 ring-inset ring-p-accent/25'
+                  : 'bg-p-surface-hover text-p-text-muted',
+              ].join(' ')}>
+                {ctxMenu.currentLevel ? 'H' + ctxMenu.currentLevel + ' current' : 'Body text'}
+              </span>
+            </div>
+            <div className="line-clamp-2 font-display text-sm leading-snug text-p-text" title={ctxMenu.text}>
+              {ctxMenu.text}
+            </div>
           </div>
-          {Array.from({ length: MAX_HEADING_LEVEL }, (_, i) => i + 1).map(level => (
-            <button
-              key={level}
-              onClick={() => applyHeadingFromContextMenu(level)}
-              className="w-full text-left px-3 py-1.5 text-xs text-p-text hover:bg-p-surface-hover tab-transition flex items-center gap-2"
-            >
-              <span className="font-mono text-p-text-dim w-8">{'#'.repeat(level)}</span>
-              <span>Heading {level}</span>
-            </button>
-          ))}
-          <div className="border-t border-p-border-subtle my-0.5" />
-          <button
-            onClick={() => applyHeadingFromContextMenu(null)}
-            className="w-full text-left px-3 py-1.5 text-xs text-p-text-muted hover:bg-p-surface-hover tab-transition"
-          >
-            Remove heading
-          </button>
+          <div className="py-1.5">
+            {Array.from({ length: MAX_HEADING_LEVEL }, (_, i) => i + 1).map(level => {
+              const isCurrent = ctxMenu.currentLevel === level;
+              return (
+                <button
+                  key={level}
+                  role="menuitemradio"
+                  aria-checked={isCurrent}
+                  onClick={() => applyHeadingFromContextMenu(level)}
+                  className={[
+                    'group flex h-8 w-full items-center rounded-md px-2 text-left text-xs outline-none tab-transition focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-p-accent/60',
+                    isCurrent ? 'bg-p-accent/10 text-p-accent' : 'text-p-text hover:bg-p-surface-hover',
+                  ].join(' ')}
+                >
+                  <span
+                    className={[
+                      'mr-2 h-px shrink-0 tab-transition',
+                      isCurrent ? 'bg-p-accent' : 'bg-p-border group-hover:bg-p-accent/50',
+                    ].join(' ')}
+                    style={{ width: 5 + level * 2 }}
+                    aria-hidden="true"
+                  />
+                  <span className={[
+                    'mr-2 flex h-5 w-7 shrink-0 items-center justify-center rounded font-mono text-[10px] font-semibold',
+                    isCurrent ? 'bg-p-accent text-p-bg' : 'bg-p-bg text-p-text-muted',
+                  ].join(' ')}>
+                    H{level}
+                  </span>
+                  <span className={isCurrent ? 'font-semibold' : ''}>Heading {level}</span>
+                  {isCurrent && <Check className="ml-auto h-3.5 w-3.5" aria-hidden="true" />}
+                </button>
+              );
+            })}
+          </div>
+          {ctxMenu.currentLevel !== null && (
+            <div className="border-t border-p-border-subtle pt-1.5">
+              <button
+                role="menuitem"
+                onClick={() => applyHeadingFromContextMenu(null)}
+                className="flex h-8 w-full items-center gap-2 rounded-md px-2.5 text-left text-xs text-p-text-muted outline-none tab-transition hover:bg-p-surface-hover hover:text-p-text focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-p-accent/60"
+              >
+                <X className="h-3.5 w-3.5" aria-hidden="true" />
+                Remove heading
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>
