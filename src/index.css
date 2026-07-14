@@ -140,10 +140,24 @@ body {
 .prose-pdf h1,
 .prose-pdf h2,
 .prose-pdf h3,
-.prose-pdf h4 {
+.prose-pdf h4,
+.prose-pdf h5,
+.prose-pdf h6,
+.prose-pdf .extended-heading {
   font-family: var(--font-display);
   letter-spacing: -0.01em;
 }
+
+.prose-pdf .extended-heading {
+  margin-top: 1.5em;
+  margin-bottom: 0.6em;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.prose-pdf .extended-heading-7 { font-size: 0.95em; padding-left: 0.75rem; }
+.prose-pdf .extended-heading-8 { font-size: 0.9em; padding-left: 1.5rem; }
+.prose-pdf .extended-heading-9 { font-size: 0.85em; padding-left: 2.25rem; font-style: italic; }
 
 /* ─── Frontmatter block (Typora-style grey box) ─────────────────────────── */
 

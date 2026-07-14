@@ -1,5 +1,6 @@
 import type { ConversionJob, HistoryEntry } from '../types';
 import { getSettings, saveSettings } from './settings';
+import { collectHeadings, normalizeExtendedHeadingSyntax, remarkExtendedHeadings } from './headings';
 
 // ── Shared HTML rendering (lazy-loaded to avoid crashing on import) ──────────
 
@@ -8,7 +9,11 @@ const DOCUMENT_CSS = `
   h1 { font-size: 1.8em; border-bottom: 1px solid #ddd; padding-bottom: 0.3em; }
   h2 { font-size: 1.4em; border-bottom: 1px solid #eee; padding-bottom: 0.2em; }
   h3 { font-size: 1.2em; }
-  h1,h2,h3,h4,h5,h6 { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; margin-top: 1.5em; }
+  h1,h2,h3,h4,h5,h6,.extended-heading { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; margin-top: 1.5em; }
+  .extended-heading { margin-bottom: 0.6em; font-weight: 600; line-height: 1.4; }
+  .extended-heading-7 { font-size: 0.95em; padding-left: 0.75em; }
+  .extended-heading-8 { font-size: 0.9em; padding-left: 1.5em; }
+  .extended-heading-9 { font-size: 0.85em; padding-left: 2.25em; font-style: italic; }
   pre { background: #f4f4f4; padding: 1em; border-radius: 4px; overflow-x: auto; }
   code { background: #f4f4f4; padding: 0.15em 0.3em; border-radius: 3px; font-size: 0.9em; }
   blockquote { border-left: 3px solid #ccc; margin-left: 0; padding-left: 1em; color: #555; }
@@ -70,17 +75,18 @@ async function renderMarkdownToHtml(markdown: string, title: string): Promise<st
   const rehypeRaw = (await import('rehype-raw').catch(() => ({ default: undefined }))).default;
   const { footnoteComponents, endnotesToPlainMarkdown } = await import('./markdownFootnotes');
 
-  const { frontmatterHtml, body } = preprocessMarkdown(markdown);
+  const normalizedMarkdown = normalizeExtendedHeadingSyntax(markdown);
+  const { frontmatterHtml, body } = preprocessMarkdown(normalizedMarkdown);
 
   // Endnote books restart numbering per chapter, so their [^N] labels repeat across
   // chapters. A single GFM pass would dedup those to one note per number (cross-chapter
   // mislinks, shadowed notes) — the same failure the DOCX exporter avoids. Render the
   // notes as plain superscript text instead, matching the in-app Preview.
-  const fmMatch = markdown.match(/^---\n([\s\S]*?)\n---/);
+  const fmMatch = normalizedMarkdown.match(/^---\n([\s\S]*?)\n---/);
   const isEndnote = fmMatch ? /^notes:\s*"?endnotes"?/m.test(fmMatch[1]) : false;
   const renderBody = isEndnote ? endnotesToPlainMarkdown(body) : body;
 
-  const plugins: any[] = [remarkGfm];
+  const plugins: any[] = [remarkGfm, remarkExtendedHeadings];
   const rehypePlugins: any[] = rehypeRaw ? [rehypeRaw] : [];
 
   const renderedBody = renderToStaticMarkup(
@@ -198,7 +204,7 @@ async function saveOrDownload(
 /** Download / Save a single markdown file. */
 export async function downloadMarkdown(fileName: string, content: string, defaultDir?: string | null): Promise<void> {
   await saveOrDownload(
-    content,
+    normalizeExtendedHeadingSyntax(content),
     withExtension(fileName, '.md'),
     'text/markdown;charset=utf-8',
     [{ name: 'Markdown', extensions: ['md'] }, { name: 'All Files', extensions: ['*'] }],
@@ -261,26 +267,25 @@ export function buildJsonExport(markdownContent: string): string {
     body = body.slice(0, outlineMatch.index!) + body.slice(outlineMatch.index! + outlineMatch[0].length);
   }
 
-  // Split body into sections by headings
+  // Split body into sections by logical headings (metadata+H6 is one level 7-9 heading).
+  body = normalizeExtendedHeadingSyntax(body);
   const sections: { level: number; heading: string | null; content: string }[] = [];
-  const headingRegex = /^(#{1,6})\s+(.+)$/gm;
-  let lastIndex = 0;
-  let match: RegExpExecArray | null;
+  const lines = body.split('\n');
+  const headings = collectHeadings(body);
+  let lastLine = 0;
 
-  while ((match = headingRegex.exec(body)) !== null) {
-    // Content before this heading
-    const contentBefore = body.slice(lastIndex, match.index).trim();
-    if (lastIndex === 0 && contentBefore) {
+  for (const heading of headings) {
+    const contentBefore = lines.slice(lastLine, heading.startLineIndex).join('\n').trim();
+    if (lastLine === 0 && contentBefore) {
       sections.push({ level: 0, heading: null, content: contentBefore });
     } else if (sections.length > 0 && contentBefore) {
       sections[sections.length - 1].content = contentBefore;
     }
-    sections.push({ level: match[1].length, heading: match[2], content: '' });
-    lastIndex = match.index + match[0].length;
+    sections.push({ level: heading.level, heading: heading.text, content: '' });
+    lastLine = heading.lineIndex + 1;
   }
 
-  // Remaining content after last heading
-  const remaining = body.slice(lastIndex).trim();
+  const remaining = lines.slice(lastLine).join('\n').trim();
   if (sections.length > 0 && remaining) {
     sections[sections.length - 1].content = remaining;
   } else if (sections.length === 0 && remaining) {
@@ -329,7 +334,7 @@ export async function exportAsDocx(
       return;
     }
     onExporting?.(true);
-    const buffer = await window.electronAPI.convertMarkdownToDocx(markdownContent, format || 'standard');
+    const buffer = await window.electronAPI.convertMarkdownToDocx(normalizeExtendedHeadingSyntax(markdownContent), format || 'standard');
     const ext = format === 'logos' ? '.logos.docx' : '.docx';
     await saveOrDownload(
       buffer,
@@ -369,6 +374,7 @@ export async function runAutoExport(
 ): Promise<{ savedPath: string | null; errors: string[] }> {
   const api = window.electronAPI;
   if (!api) return { savedPath: null, errors: [] };
+  markdown = normalizeExtendedHeadingSyntax(markdown);
 
   const { autoExportFormats, fileNaming } = getSettings();
   const unique = fileNaming === 'unique';

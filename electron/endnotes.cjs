@@ -15,6 +15,8 @@
  */
 'use strict';
 
+const { isHeadingLine, isHeadingMetadataLine } = require('./headings.cjs');
+
 const SECTION_BREAK_MARKER = '<!-- ENDNOTE-SECTION-BREAK -->';
 
 /** Group {n,...} items into chapters: a number strictly LESS than the previous one
@@ -309,14 +311,14 @@ function reconcilePerChapterEndnotes(body) {
   //    at the nearest heading preceding that chapter's first reference (so the
   //    break aligns with the chapter title), else just before the reference line.
   const breakBeforeLine = new Set();
-  const isFurn = (l) => /^#{1,6}\s+/.test(l.trim()) || /^<!--\s*page:.*-->$/i.test(l.trim()) || l.trim() === '';
+  const isFurn = (l) => isHeadingLine(l) || isHeadingMetadataLine(l) || /^<!--\s*page:.*-->$/i.test(l.trim()) || l.trim() === '';
   for (let k = 1; k < groupStartLine.length; k++) {
     const refLine = groupStartLine[k];
     if (refLine === undefined) continue;
     const prevRefLine = groupStartLine[k - 1] === undefined ? 0 : groupStartLine[k - 1];
     let insertAt = -1;
     for (let i = refLine; i > prevRefLine; i--) {
-      if (/^#{1,6}\s+/.test(lines[i].trim())) { insertAt = i; break; }
+      if (isHeadingLine(lines[i])) { insertAt = i; break; }
     }
     if (insertAt < 0) { breakBeforeLine.add(refLine); continue; }
     // Extend up over the whole contiguous chapter-opening block (page marker +
@@ -351,14 +353,15 @@ function reconcilePerChapterEndnotes(body) {
 function mergeEndnoteContinuations(body) {
   const lines = body.split('\n');
   const isDef = (l) => /^\[\^\w+\]:/.test(l.trim());
-  const isHeading = (l) => /^#{1,6}\s+/.test(l.trim());
+  const isHeading = (l) => isHeadingLine(l);
+  const isHeadingMeta = (l) => isHeadingMetadataLine(l);
   const isPage = (l) => /^<!--\s*page:.*-->$/i.test(l.trim());
   const isBlank = (l) => l.trim() === '';
   const isNotesLabel = (l) => {
     const t = l.trim();
     return /^(end\s*notes|notes)$/i.test(t) || /^(notes?\s+(to|for)\b.*)$/i.test(t) || /^chapter\s+[0-9ivxlcdm]+\.?$/i.test(t);
   };
-  const isBoundary = (l) => isDef(l) || isHeading(l) || isNotesLabel(l) || l.trim() === SECTION_BREAK_MARKER;
+  const isBoundary = (l) => isDef(l) || isHeading(l) || isHeadingMeta(l) || isNotesLabel(l) || l.trim() === SECTION_BREAK_MARKER;
 
   const out = [];
   let i = 0;
@@ -430,7 +433,8 @@ function extractEndnotePages(body) {
 function stripPrintedNotesSection(body) {
   const lines = body.split('\n');
   const isDef = (l) => /^\[\^\w+\]:/.test(l.trim());
-  const isHeading = (l) => /^#{1,6}\s+/.test(l.trim());
+  const isHeading = (l) => isHeadingLine(l);
+  const isHeadingMeta = (l) => isHeadingMetadataLine(l);
   const isPage = (l) => /^<!--\s*page:.*-->$/i.test(l.trim());
   const isBlank = (l) => l.trim() === '';
   // Some transcriptions emit the notes section's "NOTES" / "Chapter N" labels as
@@ -443,8 +447,8 @@ function stripPrintedNotesSection(body) {
       || /^(notes?\s+(to|for)\b.*)$/i.test(t)
       || /^chapter\s+[0-9ivxlcdm]+\.?$/i.test(t);
   };
-  const isFurniture = (l) => isHeading(l) || isPage(l) || isBlank(l) || isNotesLabel(l);
-  const isStrippable = (l) => isHeading(l) || isPage(l) || isNotesLabel(l);
+  const isFurniture = (l) => isHeading(l) || isHeadingMeta(l) || isPage(l) || isBlank(l) || isNotesLabel(l);
+  const isStrippable = (l) => isHeading(l) || isHeadingMeta(l) || isPage(l) || isNotesLabel(l);
 
   const remove = new Array(lines.length).fill(false);
   let i = 0;

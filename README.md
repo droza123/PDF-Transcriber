@@ -110,6 +110,7 @@ Because the translation works from the finished transcription rather than the ra
 Every transcription can be exported to several formats from the in-app preview:
 
 - **Markdown** (`.md`) — the canonical output, with YAML frontmatter and a navigable outline.
+- **Deep heading hierarchies** — heading levels 1–9 are preserved throughout transcription, preview, correction, and export. Because standard Markdown and HTML only define six native levels, levels 7–9 use an H6-compatible Markdown fallback with an adjacent metadata marker; Word, HTML accessibility metadata, and JSON retain the exact logical level.
 - **Word** (`.docx`) — the Markdown is converted to a Word document that conserves all formatting, **including tables**, and footnotes are preserved as **native Word footnotes** (real footnote references, not plain text).
 - **HTML** and **JSON** — for web publishing or programmatic use.
 - **Logos / Verbum `.docx`** — an optional Word export formatted specifically for import into [Logos](https://www.logos.com/) / [Verbum](https://verbum.com/) Bible software as a **personal book**, so your own notes, articles, and study documents become searchable, linkable titles in your library.

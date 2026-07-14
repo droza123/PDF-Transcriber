@@ -1,7 +1,7 @@
 {
   "name": "pdf-transformer",
   "private": true,
-  "version": "1.47.0",
+  "version": "1.47.1",
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
@@ -9,6 +9,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "lint": "tsc --noEmit",
+    "test:headings": "node test-heading-levels.mjs",
     "electron:dev": "concurrently \"vite --port=3001\" \"wait-on http://localhost:3001 && electron .\"",
     "electron:build": "vite build && electron-builder --win",
     "electron:preview": "vite build && electron ."

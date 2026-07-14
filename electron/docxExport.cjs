@@ -9,8 +9,10 @@ const {
   reconcilePerChapterEndnotes, mergeEndnoteContinuations, extractEndnotePages,
   stripPrintedNotesSection, applyEndnoteFormatting, SECTION_BREAK_MARKER,
 } = require('./endnotes.cjs');
+const { HEADING_LEVEL_META_RE, matchHeadingAt, normalizeExtendedHeadingSyntax } = require('./headings.cjs');
 
 async function convertMarkdownToDocx(markdown) {
+  markdown = normalizeExtendedHeadingSyntax(markdown);
   const docx = await import('docx');
   const {
     Document, Packer, Paragraph, TextRun, HeadingLevel,
@@ -268,19 +270,16 @@ async function convertMarkdownToDocx(markdown) {
     }
 
     // ── Other HTML comments (skip) ─────────────────────────────────────
-    if (/^<!--.*-->$/.test(trimmed)) { i++; continue; }
+    if (/^<!--.*-->$/.test(trimmed) && !HEADING_LEVEL_META_RE.test(trimmed)) { i++; continue; }
 
     // ── Headings ───────────────────────────────────────────────────────
-    const headingMatch = trimmed.match(/^(#{1,8})\s+(.+)$/);
+    const headingMatch = matchHeadingAt(lines, i);
     if (headingMatch) {
-      const level = headingMatch[1].length;
-
+      const level = headingMatch.level;
       if (inOutline) {
-        // Render as indented outline entry, not a real heading
-        const indent = (level - 1) * 280;
         children.push(new Paragraph({
-          children: [new TextRun({ text: headingMatch[2], size: 20, color: '444444' })],
-          indent: { left: indent },
+          children: [new TextRun({ text: headingMatch.text, size: 20, color: '444444' })],
+          indent: { left: (level - 1) * 280 },
           spacing: { after: 40 },
         }));
       } else {
@@ -289,13 +288,15 @@ async function convertMarkdownToDocx(markdown) {
           3: HeadingLevel.HEADING_3, 4: HeadingLevel.HEADING_4,
           5: HeadingLevel.HEADING_5, 6: HeadingLevel.HEADING_6,
         };
-        children.push(new Paragraph({
-          children: makeRuns(headingMatch[2], fnKeyToIndex, docx, usedFootnoteIds, NoteRefRun),
-          heading: levels[level] || HeadingLevel.HEADING_6,
+        const paragraphOptions = {
+          children: makeRuns(headingMatch.text, fnKeyToIndex, docx, usedFootnoteIds, NoteRefRun),
           spacing: { before: 240, after: 120 },
-        }));
+        };
+        if (level <= 6) paragraphOptions.heading = levels[level];
+        else paragraphOptions.style = `Heading${level}`;
+        children.push(new Paragraph(paragraphOptions));
       }
-      i++;
+      i = headingMatch.lineIndex + 1;
       continue;
     }
 
@@ -400,7 +401,7 @@ async function convertMarkdownToDocx(markdown) {
   // ── Build and pack ───────────────────────────────────────────────────────
   // Explicitly define heading styles with outlineLevel so TOC generation
   // works correctly in Word and third-party tools (e.g. Logos/Verbum).
-  const headingStyles = [1, 2, 3, 4, 5, 6].map(level => ({
+  const headingStyles = [1, 2, 3, 4, 5, 6, 7, 8, 9].map(level => ({
     id: `Heading${level}`,
     name: `Heading ${level}`,
     basedOn: 'Normal',
@@ -526,7 +527,7 @@ async function deduplicateHeadingStyles(buffer) {
   const zip = await JSZip.loadAsync(buffer);
   const stylesXml = await zip.file('word/styles.xml').async('string');
 
-  const styleRegex = /<w:style\b[^>]*w:styleId="(Heading[1-6]|Title)"[^>]*>[\s\S]*?<\/w:style>/g;
+  const styleRegex = /<w:style\b[^>]*w:styleId="(Heading[1-9]|Title)"[^>]*>[\s\S]*?<\/w:style>/g;
   const matches = [];
   let m;
   while ((m = styleRegex.exec(stylesXml)) !== null) {

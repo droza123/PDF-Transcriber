@@ -9,6 +9,15 @@
  */
 import { callTextWithRetry } from './providers/orchestrator';
 import type { Provider } from './providers/types';
+import {
+  collectHeadings,
+  EXTENDED_ATX_HEADING_RE,
+  MAX_HEADING_LEVEL,
+  MARKDOWN_HEADING_LEVELS,
+  normalizeExtendedHeadingSyntax,
+  serializeHeading,
+  type ParsedHeading,
+} from './headings';
 
 export interface HeadingCorrectionOptions {
   provider?: Provider;
@@ -48,7 +57,7 @@ export interface HeadingCorrectionResult {
 /** ~tokens per chunk stays comfortably inside model context; output is tiny. */
 const CHUNK_TARGET_WORDS = 20000;
 
-const HEADING_RE = /^(#{1,6})\s+(.+?)\s*#*\s*$/;
+const HEADING_RE = EXTENDED_ATX_HEADING_RE;
 const PAGE_MARKER_RE = /^\s*<!--\s*page:\s*(\S+)\s*-->/i;
 const FOOTNOTE_DEF_RE = /^\[\^[^\]]+\]:/;
 
@@ -99,25 +108,30 @@ function extractTrailingPage(text: string): { text: string; page: string | null 
 /** Parse the prescan outline (markdown headings or indented bullets) into entries. */
 export function parseOutlineEntries(outline: string): OutlineEntry[] {
   const entries: OutlineEntry[] = [];
-  for (const line of outline.split('\n')) {
-    let level: number | null = null;
-    let raw = '';
-    const hm = line.match(/^(#{1,6})\s+(.+)$/);
-    if (hm) {
-      level = hm[1].length;
-      raw = hm[2];
-    } else {
-      const lm = line.match(/^(\s*)[*-]\s+(.+)$/);
-      if (lm) {
-        level = Math.min(6, Math.floor(lm[1].length / 2) + 1);
-        raw = lm[2];
-      }
-    }
-    if (level == null) continue;
-    const { text, page } = extractTrailingPage(raw);
-    if (!text) continue;
-    entries.push({ level, text, norm: normalizeHeadingText(text), page });
+
+  for (const heading of collectHeadings(outline)) {
+    const { text: headingText, page } = extractTrailingPage(heading.text);
+    if (headingText) entries.push({
+      level: heading.level,
+      text: headingText,
+      norm: normalizeHeadingText(headingText),
+      page,
+    });
   }
+
+  for (const line of outline.split('\n')) {
+    const lm = line.match(/^(\s*)[*-]\s+(.+)$/);
+    if (!lm) continue;
+    const level = Math.min(MAX_HEADING_LEVEL, Math.floor(lm[1].length / 2) + 1);
+    const { text: headingText, page } = extractTrailingPage(lm[2]);
+    if (headingText) entries.push({
+      level,
+      text: headingText,
+      norm: normalizeHeadingText(headingText),
+      page,
+    });
+  }
+
   return entries;
 }
 
@@ -231,7 +245,7 @@ ${authority}
 Your job is to make the heading structure correct. Body text is NOT yours to edit — you output ONLY edit commands, never document text.
 
 Available commands, one per line, pipe-delimited:
-RELEVEL|<line>|<level>            — a real heading at the wrong depth; set its level (1-6)
+RELEVEL|<line>|<level>            — a real heading at the wrong depth; set its level (1-9)
 DEMOTE|<line>                     — a false heading (running header, TOC echo, figure caption, page banner); convert it to plain text
 MERGE|<line>                      — a heading accidentally split across two adjacent heading lines; merge this line's text into the adjacent heading
 ${insertRules}
@@ -241,7 +255,8 @@ Rules:
 - Only emit commands for real discrepancies; correct headings need nothing.
 ${guardRules}
 - Never target page markers, footnote definitions ("[^N]: ..."), block quotes, list items, or table rows.
-- Avoid level 6 unless the structure genuinely requires a sixth level.
+- Levels 7-9 use a metadata line immediately followed by an H6 fallback, for example "<!-- heading-level: 7 -->" then "###### Title". Treat that pair as one level-7 heading and target the H6 line number in commands.
+- Use levels 7-9 only when the structure genuinely requires that depth.
 - Inline list labels like "a)", "b)", "c)" inside an argument are not headings.
 
 Output ONLY the commands, one per line. If no changes are needed, output exactly: NONE
@@ -272,14 +287,14 @@ function parseCommands(responseText: string): Command[] {
     switch (action) {
       case 'RELEVEL': {
         const level = parseInt(parts[2], 10);
-        if (level >= 1 && level <= 6) commands.push({ action: 'relevel', line: n, level });
+        if (level >= 1 && level <= MAX_HEADING_LEVEL) commands.push({ action: 'relevel', line: n, level });
         break;
       }
       case 'DEMOTE': commands.push({ action: 'demote', line: n }); break;
       case 'MERGE': case 'MERGE_UP': commands.push({ action: 'merge', line: n }); break;
       case 'PROMOTE': {
         const level = parseInt(parts[2], 10);
-        if (level >= 1 && level <= 6) commands.push({ action: 'promote', line: n, level });
+        if (level >= 1 && level <= MAX_HEADING_LEVEL) commands.push({ action: 'promote', line: n, level });
         break;
       }
       case 'RETITLE': {
@@ -290,7 +305,7 @@ function parseCommands(responseText: string): Command[] {
       case 'INSERT': {
         const level = parseInt(parts[2], 10);
         const text = parts.slice(3).join('|');
-        if (level >= 1 && level <= 6 && text) commands.push({ action: 'insert', afterLine: n, level, text });
+        if (level >= 1 && level <= MAX_HEADING_LEVEL && text) commands.push({ action: 'insert', afterLine: n, level, text });
         break;
       }
     }
@@ -307,6 +322,30 @@ function snapToBlankLine(lines: string[], idx: number, maxSlide = 20): number | 
   return null;
 }
 
+function headingAtVisibleLine(lines: string[], lineIndex: number): ParsedHeading | null {
+  return collectHeadings(lines.join('\n')).find(h => h.lineIndex === lineIndex) ?? null;
+}
+
+function writeHeadingInPlace(lines: string[], heading: ParsedHeading, level: number, text: string): void {
+  if (heading.startLineIndex < heading.lineIndex) {
+    lines[heading.startLineIndex] = level > MARKDOWN_HEADING_LEVELS
+      ? `<!-- heading-level: ${level} -->`
+      : '';
+    lines[heading.lineIndex] = level > MARKDOWN_HEADING_LEVELS
+      ? `${'#'.repeat(MARKDOWN_HEADING_LEVELS)} ${text}`
+      : `${'#'.repeat(level)} ${text}`;
+    return;
+  }
+
+  // A raw 7-9 hash line is a temporary in-place representation. The final
+  // normalization pass expands it into metadata+H6 without shifting command lines.
+  lines[heading.lineIndex] = `${'#'.repeat(level)} ${text}`;
+}
+
+function clearHeading(lines: string[], heading: ParsedHeading): void {
+  for (let i = heading.startLineIndex; i <= heading.lineIndex; i++) lines[i] = '';
+}
+
 // ── Main entry point ─────────────────────────────────────────────────────────
 
 /**
@@ -321,43 +360,38 @@ export async function correctHeadings(
   options: HeadingCorrectionOptions = {},
 ): Promise<HeadingCorrectionResult> {
   const { onProgress, ...callOptions } = options;
-  const lines = markdown.split('\n');
+  const normalizedMarkdown = normalizeExtendedHeadingSyntax(markdown);
+  const syntaxNormalized = normalizedMarkdown !== markdown;
+  const lines = normalizedMarkdown.split('\n');
   const fenced = fencedLineIndices(lines);
   const markers = pageMarkerIndex(lines);
   const outlineEntries = outline ? parseOutlineEntries(outline) : [];
   const outlineNorms = new Set(outlineEntries.map(e => e.norm));
-
-  const headingLineIdx: number[] = [];
-  for (let i = 0; i < lines.length; i++) {
-    if (!fenced.has(i) && HEADING_RE.test(lines[i])) headingLineIdx.push(i);
-  }
-  const totalHeadings = headingLineIdx.length;
+  const originalHeadings = collectHeadings(normalizedMarkdown).filter(h => !fenced.has(h.lineIndex));
+  const headingLineIdx = originalHeadings.map(h => h.lineIndex);
+  const totalHeadings = originalHeadings.length;
 
   const noop = (reason: string): HeadingCorrectionResult => {
     console.log(`[heading-correction] No-op: ${reason}`);
     return {
-      correctedMarkdown: markdown,
-      changed: false,
+      correctedMarkdown: normalizedMarkdown,
+      changed: syntaxNormalized,
       stats: { releveled: 0, demoted: 0, merged: 0, promoted: 0, retitled: 0, inserted: 0, rejected: 0, totalHeadings },
       report: structuralReport(lines, fenced),
     };
   };
 
-  // Nothing to anchor on: a heading-less document with no outline authority.
   if (totalHeadings === 0 && outlineEntries.length === 0) {
     return noop('document has no headings and no outline authority');
   }
 
-  // Gather commands (one model call per chunk; long books get several).
   const ranges = chunkRanges(lines);
   const commands: Command[] = [];
   try {
     for (let c = 0; c < ranges.length; c++) {
       if (options.abortSignal?.aborted) throw new DOMException('Cancelled', 'AbortError');
       const [start, end] = ranges[c];
-      if (ranges.length > 1) {
-        onProgress?.(`Heading correction: analyzing part ${c + 1}/${ranges.length}...`);
-      }
+      if (ranges.length > 1) onProgress?.(`Heading correction: analyzing part ${c + 1}/${ranges.length}...`);
       const numbered = lines.slice(start, end).map((l, i) => `${start + i + 1}|${l}`).join('\n');
       const prompt = buildPrompt(numbered, outline, c + 1, ranges.length);
       const result = await callTextWithRetry(prompt, callOptions);
@@ -369,29 +403,16 @@ export async function correctHeadings(
     return noop(`model call failed (${e?.message})`);
   }
 
-  if (commands.length === 0) {
-    return noop('model reported no changes needed');
-  }
+  if (commands.length === 0) return noop('model reported no changes needed');
 
-  // ── Apply with guards ──────────────────────────────────────────────────────
   const out = [...lines];
   const stats: HeadingCorrectionStats = { releveled: 0, demoted: 0, merged: 0, promoted: 0, retitled: 0, inserted: 0, rejected: 0, totalHeadings };
   const reject = () => { stats.rejected++; };
-
-  // Track texts promoted/present so INSERT can't duplicate them.
-  const presentNorms = new Set<string>();
-  for (const idx of headingLineIdx) {
-    const m = out[idx].match(HEADING_RE);
-    if (m) presentNorms.add(normalizeHeadingText(m[2]));
-  }
-
+  const presentNorms = new Set(originalHeadings.map(h => normalizeHeadingText(h.text)));
   const lineOk = (n: number) => n >= 1 && n <= out.length && !fenced.has(n - 1);
 
-  // Order matters: text fixes before level fixes, structure changes last.
   const order: Record<Command['action'], number> = { retitle: 0, relevel: 1, merge: 2, demote: 3, promote: 4, insert: 5 };
   commands.sort((a, b) => order[a.action] - order[b.action]);
-
-  // De-duplicate: keep the last command per (action, line) pair.
   const seen = new Set<string>();
   const deduped: Command[] = [];
   for (let i = commands.length - 1; i >= 0; i--) {
@@ -403,93 +424,85 @@ export async function correctHeadings(
   }
 
   const inserts: { afterIdx: number; level: number; text: string }[] = [];
-
   for (const cmd of deduped) {
     switch (cmd.action) {
       case 'retitle': {
         if (!lineOk(cmd.line)) { reject(); break; }
-        const i = cmd.line - 1;
-        const m = out[i].match(HEADING_RE);
-        if (!m) { reject(); break; }
-        // Only allowed against the outline's wording.
-        if (!outlineNorms.has(normalizeHeadingText(cmd.text))) { reject(); break; }
-        presentNorms.delete(normalizeHeadingText(m[2]));
-        out[i] = `${m[1]} ${cmd.text}`;
+        const heading = headingAtVisibleLine(out, cmd.line - 1);
+        if (!heading || !outlineNorms.has(normalizeHeadingText(cmd.text))) { reject(); break; }
+        presentNorms.delete(normalizeHeadingText(heading.text));
+        writeHeadingInPlace(out, heading, heading.level, cmd.text);
         presentNorms.add(normalizeHeadingText(cmd.text));
         stats.retitled++;
         break;
       }
       case 'relevel': {
         if (!lineOk(cmd.line)) { reject(); break; }
-        const i = cmd.line - 1;
-        const m = out[i].match(HEADING_RE);
-        if (!m) { reject(); break; }
-        if (m[1].length !== cmd.level) {
-          out[i] = '#'.repeat(cmd.level) + ' ' + m[2];
+        const heading = headingAtVisibleLine(out, cmd.line - 1);
+        if (!heading) { reject(); break; }
+        if (heading.level !== cmd.level) {
+          writeHeadingInPlace(out, heading, cmd.level, heading.text);
           stats.releveled++;
         }
         break;
       }
       case 'merge': {
         if (!lineOk(cmd.line)) { reject(); break; }
-        const i = cmd.line - 1;
-        const m = out[i].match(HEADING_RE);
-        if (!m) { reject(); break; }
-        // Find the adjacent heading (previous non-blank preferred, else next).
-        let prev = i - 1;
-        while (prev >= 0 && out[prev].trim() === '') prev--;
-        let next = i + 1;
-        while (next < out.length && out[next].trim() === '') next++;
-        const prevM = prev >= 0 ? out[prev].match(HEADING_RE) : null;
-        const nextM = next < out.length ? out[next].match(HEADING_RE) : null;
-        if (prevM) {
-          out[prev] = `${prevM[1]} ${prevM[2]} ${m[2]}`;
-          out[i] = '';
+        const headings = collectHeadings(out.join('\n'));
+        const pos = headings.findIndex(h => h.lineIndex === cmd.line - 1);
+        if (pos < 0) { reject(); break; }
+        const current = headings[pos];
+        const prev = headings[pos - 1];
+        const next = headings[pos + 1];
+        const prevAdjacent = prev && out.slice(prev.lineIndex + 1, current.startLineIndex).every(l => l.trim() === '');
+        const nextAdjacent = next && out.slice(current.lineIndex + 1, next.startLineIndex).every(l => l.trim() === '');
+        if (prevAdjacent && prev) {
+          const mergedText = `${prev.text} ${current.text}`;
+          writeHeadingInPlace(out, prev, prev.level, mergedText);
+          clearHeading(out, current);
+          presentNorms.delete(normalizeHeadingText(prev.text));
+          presentNorms.delete(normalizeHeadingText(current.text));
+          presentNorms.add(normalizeHeadingText(mergedText));
           stats.merged++;
-        } else if (nextM) {
-          out[next] = `${nextM[1]} ${m[2]} ${nextM[2]}`;
-          out[i] = '';
+        } else if (nextAdjacent && next) {
+          const mergedText = `${current.text} ${next.text}`;
+          writeHeadingInPlace(out, next, next.level, mergedText);
+          clearHeading(out, current);
+          presentNorms.delete(normalizeHeadingText(current.text));
+          presentNorms.delete(normalizeHeadingText(next.text));
+          presentNorms.add(normalizeHeadingText(mergedText));
           stats.merged++;
-        } else {
-          reject();
-        }
+        } else reject();
         break;
       }
       case 'demote': {
         if (!lineOk(cmd.line)) { reject(); break; }
-        const i = cmd.line - 1;
-        const m = out[i].match(HEADING_RE);
-        if (!m) { reject(); break; }
-        presentNorms.delete(normalizeHeadingText(m[2]));
-        out[i] = `**${m[2]}**`;
+        const heading = headingAtVisibleLine(out, cmd.line - 1);
+        if (!heading) { reject(); break; }
+        presentNorms.delete(normalizeHeadingText(heading.text));
+        clearHeading(out, heading);
+        out[heading.lineIndex] = `**${heading.text}**`;
         stats.demoted++;
         break;
       }
       case 'promote': {
         if (!lineOk(cmd.line)) { reject(); break; }
         const i = cmd.line - 1;
-        if (HEADING_RE.test(out[i]) || isProtectedLine(out[i])) { reject(); break; }
-        const text = out[i].trim().replace(/^\*\*(.+?)\*\*$/, '$1').trim();
-        if (!text || text.length > 200) { reject(); break; }
-        // With an outline, a promotion must correspond to a real outline entry.
-        if (outlineEntries.length > 0 && !outlineNorms.has(normalizeHeadingText(text))) { reject(); break; }
-        out[i] = '#'.repeat(cmd.level) + ' ' + text;
-        presentNorms.add(normalizeHeadingText(text));
+        if (headingAtVisibleLine(out, i) || isProtectedLine(out[i])) { reject(); break; }
+        const headingText = out[i].trim().replace(/^\*\*(.+?)\*\*$/, '$1').trim();
+        if (!headingText || headingText.length > 200) { reject(); break; }
+        if (outlineEntries.length > 0 && !outlineNorms.has(normalizeHeadingText(headingText))) { reject(); break; }
+        out[i] = `${'#'.repeat(cmd.level)} ${headingText}`;
+        presentNorms.add(normalizeHeadingText(headingText));
         stats.promoted++;
         break;
       }
       case 'insert': {
-        // Only with authority, only for outline entries missing everywhere.
         const norm = normalizeHeadingText(cmd.text);
         const entry = outlineEntries.find(e => e.norm === norm);
-        if (!entry) { reject(); break; }
-        if (presentNorms.has(norm)) { reject(); break; }
-        if (cmd.afterLine < 0 || cmd.afterLine > out.length) { reject(); break; }
-        // Snap to a paragraph boundary near the requested point.
+        if (!entry || presentNorms.has(norm) || cmd.afterLine < 0 || cmd.afterLine > out.length) { reject(); break; }
         const snapped = snapToBlankLine(out, Math.min(cmd.afterLine, out.length - 1));
         if (snapped == null) { reject(); break; }
-        // Page-span guard: when the outline knows the printed page and the
-        // document has that page's marker, the insertion must land on that page.
         if (entry.page) {
           const span = pageSpan(out, markers, entry.page);
           if (span && (snapped < span[0] || snapped >= span[1])) { reject(); break; }
@@ -502,25 +515,20 @@ export async function correctHeadings(
     }
   }
 
-  // Apply inserts bottom-up so earlier indices stay valid. Skip the leading
-  // blank when the anchor line is already blank (snapToBlankLine's usual case).
   inserts.sort((a, b) => b.afterIdx - a.afterIdx);
   for (const ins of inserts) {
-    const heading = '#'.repeat(ins.level) + ' ' + ins.text;
-    if (out[ins.afterIdx]?.trim() === '') {
-      out.splice(ins.afterIdx + 1, 0, heading, '');
-    } else {
-      out.splice(ins.afterIdx + 1, 0, '', heading, '');
-    }
+    const headingLines = serializeHeading(ins.level, ins.text).split('\n');
+    if (out[ins.afterIdx]?.trim() === '') out.splice(ins.afterIdx + 1, 0, ...headingLines, '');
+    else out.splice(ins.afterIdx + 1, 0, '', ...headingLines, '');
   }
 
   const applied = stats.releveled + stats.demoted + stats.merged + stats.promoted + stats.retitled + stats.inserted;
-  const correctedMarkdown = out.join('\n');
+  const correctedMarkdown = normalizeExtendedHeadingSyntax(out.join('\n'));
   console.log(`[heading-correction] Applied ${applied} edit(s): ${stats.releveled} releveled, ${stats.demoted} demoted, ${stats.merged} merged, ${stats.promoted} promoted, ${stats.retitled} retitled, ${stats.inserted} inserted; ${stats.rejected} rejected by guards`);
 
   return {
     correctedMarkdown,
-    changed: applied > 0,
+    changed: applied > 0 || syntaxNormalized,
     stats,
     report: structuralReport(correctedMarkdown.split('\n'), fencedLineIndices(correctedMarkdown.split('\n'))),
   };
@@ -528,18 +536,16 @@ export async function correctHeadings(
 
 /** One-line structural health summary (level jumps = level increasing by >1). */
 function structuralReport(lines: string[], fenced: Set<number>): string {
-  let count = 0, h6 = 0, jumps = 0, prev = 0;
-  for (let i = 0; i < lines.length; i++) {
-    if (fenced.has(i)) continue;
-    const m = lines[i].match(HEADING_RE);
-    if (!m) continue;
-    count++;
-    const level = m[1].length;
-    if (level === 6) h6++;
-    if (prev > 0 && level > prev + 1) jumps++;
-    prev = level;
+  const headings = collectHeadings(lines.join('\n')).filter(h => !fenced.has(h.lineIndex));
+  let jumps = 0;
+  let previous = 0;
+  let deepest = 0;
+  for (const heading of headings) {
+    if (previous > 0 && heading.level > previous + 1) jumps++;
+    previous = heading.level;
+    deepest = Math.max(deepest, heading.level);
   }
-  return `${count} headings, ${jumps} level jump(s), ${h6} H6`;
+  return `${headings.length} headings, ${jumps} level jump(s), deepest H${deepest || 0}`;
 }
 
 /** Format the stats for a status/log line. */

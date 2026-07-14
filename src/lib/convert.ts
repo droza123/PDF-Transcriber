@@ -10,7 +10,8 @@ import {
   parseNoteStyle,
 } from './gemini';
 import { correctHeadings, formatCorrectionStats } from './headingCorrection';
-import { cleanHeadings } from './headingCleanup';
+import { changeHeadingLevels, cleanHeadings } from './headingCleanup';
+import { collectHeadings, MAX_HEADING_LEVEL, normalizeExtendedHeadingSyntax } from './headings';
 import { getScanProvider, getTranscribeProvider } from './providers/registry';
 
 type ProgressCallback = (update: Partial<ConversionJob>) => void;
@@ -57,28 +58,22 @@ function normalizeBlankLines(text: string): string {
  * Parse headings from a prescan outline, supporting both formats:
  * - Markdown headings: `## Title`
  * - Indented bullet lists: `  - 1. Title (page)`
- * Returns a map of normalized heading text → heading level (1-6).
+ * Returns a map of normalized heading text → heading level (1-9).
  */
 function parseOutlineHeadings(outline: string): Map<string, number> {
   const levelMap = new Map<string, number>();
 
-  for (const line of outline.split('\n')) {
-    // Format 1: Markdown headings (# through ######)
-    const hm = line.match(/^(#{1,6})\s+(.+)$/);
-    if (hm) {
-      const key = normalizeHeadingText(hm[2]);
-      if (!levelMap.has(key)) levelMap.set(key, hm[1].length);
-      continue;
-    }
+  for (const heading of collectHeadings(outline)) {
+    const key = normalizeHeadingText(heading.text);
+    if (!levelMap.has(key)) levelMap.set(key, heading.level);
+  }
 
-    // Format 2: Indented bullet list (- or * with leading spaces)
+  for (const line of outline.split('\n')) {
     const lm = line.match(/^(\s*)[*-]\s+(.+)$/);
-    if (lm) {
-      const indent = lm[1].length;
-      const level = Math.min(6, Math.floor(indent / 2) + 1);
-      const key = normalizeHeadingText(lm[2]);
-      if (!levelMap.has(key)) levelMap.set(key, level);
-    }
+    if (!lm) continue;
+    const level = Math.min(MAX_HEADING_LEVEL, Math.floor(lm[1].length / 2) + 1);
+    const key = normalizeHeadingText(lm[2]);
+    if (!levelMap.has(key)) levelMap.set(key, level);
   }
 
   return levelMap;
@@ -91,23 +86,20 @@ function parseOutlineHeadings(outline: string): Map<string, number> {
  */
 function remapHeadingsFromOutline(markdown: string, outline: string): { text: string; remapped: number; outlineSize: number } {
   const levelMap = parseOutlineHeadings(outline);
+  const normalized = normalizeExtendedHeadingSyntax(markdown);
+  if (levelMap.size === 0) return { text: normalized, remapped: 0, outlineSize: 0 };
 
-  if (levelMap.size === 0) return { text: markdown, remapped: 0, outlineSize: 0 };
+  const changes = new Map<number, number>();
+  collectHeadings(normalized).forEach((heading, index) => {
+    const correctLevel = levelMap.get(normalizeHeadingText(heading.text));
+    if (correctLevel != null && correctLevel !== heading.level) changes.set(index, correctLevel);
+  });
 
-  let remapped = 0;
-  const text = markdown.split('\n').map(line => {
-    const m = line.match(/^(#{1,6})\s+(.+)$/);
-    if (!m) return line;
-    const key = normalizeHeadingText(m[2]);
-    const correctLevel = levelMap.get(key);
-    if (correctLevel != null && correctLevel !== m[1].length) {
-      remapped++;
-      return '#'.repeat(correctLevel) + ' ' + m[2];
-    }
-    return line;
-  }).join('\n');
-
-  return { text, remapped, outlineSize: levelMap.size };
+  return {
+    text: changeHeadingLevels(normalized, changes),
+    remapped: changes.size,
+    outlineSize: levelMap.size,
+  };
 }
 
 /**
@@ -471,6 +463,11 @@ export async function convertFile(options: ConvertFileOptions): Promise<string> 
     console.log(`[convert] ${pageMsg}`);
   }
 
+  // Canonicalize raw 7-9 hash headings before correction and every downstream export.
+  const canonicalHeadings = normalizeExtendedHeadingSyntax(results.join('\n\n'));
+  results.length = 0;
+  results.push(canonicalHeadings);
+
   // AI heading correction against the prescan outline, run on the scan model.
   // Always runs for OCR transcriptions (the OCR model guesses levels visually);
   // for prompt-capable transcriptions it is the opt-in headingCorrectionEnabled
@@ -500,7 +497,7 @@ export async function convertFile(options: ConvertFileOptions): Promise<string> 
   }
 
   // Assemble final output
-  let body = normalizeBlankLines(results.join('\n\n'));
+  let body = normalizeBlankLines(normalizeExtendedHeadingSyntax(results.join('\n\n')));
   // Heading-quality post-processing (duplicates, TOC artifacts, markdown glitches).
   if (getSettings().headingCleanupEnabled) {
     body = cleanHeadings(body);

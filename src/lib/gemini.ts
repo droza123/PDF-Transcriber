@@ -7,6 +7,7 @@ import { callWithRetry, callTextWithRetry, type OrchestratorCallOptions } from '
 import type { Provider, ProviderResult } from './providers/types';
 import { getSettings } from './settings';
 import { getTranscribeProvider } from './providers/registry';
+import { collectHeadings, serializeHeading } from './headings';
 
 // Re-export types for backward compat
 export type GeminiCallOptions = OrchestratorCallOptions;
@@ -30,14 +31,16 @@ NOTE STYLE: <footnotes|endnotes|none>
 Then include:
 
 1. The document's page numbering scheme (e.g., "roman numerals i-xii for front matter, then arabic 1-234 for body", or "no page numbers visible").
-2. A hierarchical table of contents using Markdown headings to show the FULL nesting depth. Use up to six levels (# through ######) as needed to capture the document's actual structure:
-   # Part / major division                (e.g., "Part One", "§1")
-   ## Chapter / section                   (e.g., "Chapter 3", "A.", "Commentary on Matthew 1")
-   ### Subsection                         (e.g., "1.", "I.", "Introduction", "Text")
-   #### Sub-subsection                    (e.g., "1.1", "a.", "Historical Context")
-   ##### Sub-sub-subsection               (e.g., "1.1.1", "i.")
-   ###### Deepest level                   (rarely needed; use only for genuine 6th-level nesting)
-   Include the page number (as printed in the document) next to each heading if visible.
+2. A hierarchical table of contents using up to nine levels as needed to capture the document's FULL nesting depth:
+   # through ###### represent levels 1 through 6 normally.
+   For levels 7 through 9, NEVER use seven or more opening # characters. Use an H6 fallback preceded immediately by a metadata comment, exactly like this:
+   <!-- heading-level: 7 -->
+   ###### Seventh-level title
+   <!-- heading-level: 8 -->
+   ###### Eighth-level title
+   <!-- heading-level: 9 -->
+   ###### Ninth-level title
+   Include the page number (as printed in the document) in the heading text if visible. Use levels 7-9 only when the source genuinely contains that depth.
 
 Source of truth:
 - If the document has a printed Table of Contents, prefer it as the hierarchy source — its indentation and numbering tell you the correct nesting depth.
@@ -126,7 +129,7 @@ Structural fidelity:
 - If the outline indicates the document has little or no explicit structure (e.g. a letter, an essay, an article, an unbroken narrative, a poem, a list, or a form), transcribe the content exactly as it appears — preserving its original form and order, whatever that is (running paragraphs, verse lines, list items, dialogue, tabular data, or a single block of text) — and emit NO headings. Producing zero headings is the correct outcome for an unstructured document: render the document as it is and do not add structure the source lacks.
 
 Content rules:
-1. Use the heading hierarchy from the outline above to determine correct heading levels (# ## ### etc.). Match headings to the outline — do not guess levels independently. If the outline is empty or indicates no structure, follow the Structural fidelity guidance above and emit no headings.
+1. Use the heading hierarchy from the outline above to determine correct heading levels. Match headings to the outline — do not guess levels independently. For levels 7-9, preserve the outline's exact two-line <!-- heading-level: N --> plus ###### fallback syntax. Never emit seven or more opening # characters. If the outline is empty or indicates no structure, follow the Structural fidelity guidance above and emit no headings.
 2. If the document has a table of contents, render its entries as plain text — not as headings. Only use heading syntax for actual chapter/section titles in the body.
 3. Preserve paragraph structure with blank lines between paragraphs.
 4. Convert tables to Markdown table syntax.
@@ -146,13 +149,10 @@ ${noteRules}
  * Returns the headings as-is, each on its own line, or '' if none found.
  */
 export function extractTrailingHeadings(markdown: string, count = 5): string {
-  const matches: string[] = [];
-  for (const line of markdown.split('\n')) {
-    if (/^(#{1,6})\s+\S/.test(line)) {
-      matches.push(line.trim());
-    }
-  }
-  return matches.slice(-count).join('\n');
+  return collectHeadings(markdown)
+    .slice(-count)
+    .map(heading => serializeHeading(heading.level, heading.text))
+    .join('\n');
 }
 
 // ── Public exports consumed by convert.ts ───────────────────────────────────
@@ -265,7 +265,7 @@ function buildTranslationPrompt(chunk: string, chunkNum: number, totalChunks: nu
   return `Translate the following Markdown into ${targetLanguage}.
 ${totalChunks > 1 ? `This is chunk ${chunkNum} of ${totalChunks} from the source document.\n` : ''}
 Rules:
-- Preserve all Markdown formatting, heading levels, footnotes [^N], tables, page markers (<!-- page: N -->), and block quotes exactly.
+- Preserve all Markdown formatting, heading levels, footnotes [^N], tables, page markers (<!-- page: N -->), heading-level metadata comments (<!-- heading-level: 7 --> through 9), and block quotes exactly.
 - Keep bibliographic references (titles, authors, publishers, journal names) in their original language.
 - Passages that are in a foreign language in the original (e.g., Greek, Latin, Hebrew quotes) should NOT be translated — preserve them exactly as written. These are intentionally in a different language.
 - Output only the translated Markdown — no commentary.${extra}

@@ -12,6 +12,14 @@ import { getScanProvider } from '../lib/providers/registry';
 import { getScanModelPriority, getSettings } from '../lib/settings';
 import { getApiKey } from '../lib/apiKey';
 import { footnoteComponents, endnotesToPlainMarkdown } from '../lib/markdownFootnotes';
+import {
+  collectHeadings,
+  countHeadings,
+  MAX_HEADING_LEVEL,
+  normalizeExtendedHeadingSyntax,
+  remarkExtendedHeadings,
+  serializeHeading,
+} from '../lib/headings';
 
 interface PreviewProps {
   job?: ConversionJob;
@@ -62,7 +70,7 @@ const MarkdownChunk = memo(function MarkdownChunk({ content, startHeadingIndex }
   };
   return (
     <ReactMarkdown
-      remarkPlugins={[remarkGfm]}
+      remarkPlugins={[remarkGfm, remarkExtendedHeadings]}
       // rehype-raw renders inline HTML the transcription emits (e.g. <sup>1</sup>
       // Scripture verse numbers) as real elements instead of literal text, matching
       // the HTML/DOCX exports. Page-marker comments are pre-wrapped as code spans
@@ -83,6 +91,14 @@ const MarkdownChunk = memo(function MarkdownChunk({ content, startHeadingIndex }
         h4: heading(4),
         h5: heading(5),
         h6: heading(6),
+        div({ children, node: _node, ...props }: any) {
+          const level = Number(props['data-heading-level']);
+          if (level > 6 && level <= MAX_HEADING_LEVEL) {
+            const id = `md-heading-${startHeadingIndex + counter.n++}`;
+            return <div {...props} id={id}>{children}</div>;
+          }
+          return <div {...props}>{children}</div>;
+        },
         // Make footnote refs/definitions show the original printed numbers.
         ...footnoteComponents,
       }}
@@ -215,7 +231,7 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
 
   // Replace HTML comments with backtick-wrapped code so ReactMarkdown renders them
   const renderedBody = useMemo(() => {
-    const withComments = body
+    const withComments = normalizeExtendedHeadingSyntax(body)
       .replace(/<!--\s*(page:\s*.+?)\s*-->/g, '`<!-- $1 -->`')
       .replace(/<!--\s*(Document Outline)\s*-->/g, '`<!-- $1 -->`');
     return isEndnote ? endnotesToPlainMarkdown(withComments) : withComments;
@@ -266,13 +282,7 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
     let total = 0;
     for (const ch of chunks) {
       starts.push(total);
-      const chLines = ch.split('\n');
-      let inFence = false;
-      for (const line of chLines) {
-        if (/^```/.test(line.trim())) { inFence = !inFence; continue; }
-        if (inFence) continue;
-        if (/^#{1,6}\s+\S/.test(line)) total++;
-      }
+      total += countHeadings(ch);
     }
     return starts;
   }, [chunks]);
@@ -325,7 +335,7 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
 
   // Run the heading-cleanup pass on the current markdown and stage the result
   // as an override. No persistence happens until the user clicks "Save".
-  const headingCount = (s: string) => (s.match(/^#{1,6}\s+\S/gm) || []).length;
+  const headingCount = (s: string) => countHeadings(s);
   function handleCleanHeadings() {
     const source = cleanedOverride ?? baseMd;
     setFixMessage(null);
@@ -476,7 +486,7 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
       const h = outline[idx];
       if (!h) continue;
       const newLevel = h.level + delta;
-      if (newLevel >= 1 && newLevel <= 6) {
+      if (newLevel >= 1 && newLevel <= MAX_HEADING_LEVEL) {
         changes.set(h.index, newLevel);
       }
     }
@@ -505,33 +515,48 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
 
   function applyHeadingFromContextMenu(level: number | null) {
     if (!ctxMenu) return;
-    const currentMd = cleanedOverride ?? baseMd;
+    const currentMd = normalizeExtendedHeadingSyntax(cleanedOverride ?? baseMd);
     const selectedText = ctxMenu.text;
     setCtxMenu(null);
 
-    // Find the line in markdown that contains this text
-    const lines = currentMd.split('\n');
-    let matchIdx = -1;
-    for (let i = 0; i < lines.length; i++) {
-      const stripped = lines[i].replace(/^#{1,6}\s+/, '').replace(/^\*\*(.+)\*\*$/, '$1').trim();
-      if (stripped === selectedText || lines[i].trim() === selectedText) {
-        matchIdx = i;
-        break;
+    const plainLabel = (value: string) => value
+      .replace(/`([^`]+)`/g, '$1')
+      .replace(/\*\*([^*]+)\*\*/g, '$1')
+      .replace(/\*([^*]+)\*/g, '$1')
+      .replace(/_([^_]+)_/g, '$1')
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+      .trim();
+    const headings = collectHeadings(currentMd);
+    const headingIndex = headings.findIndex(h => plainLabel(h.text) === selectedText);
+    let newMd: string | null = null;
+
+    if (headingIndex >= 0) {
+      if (level === null) {
+        const lines = currentMd.split('\n');
+        const heading = headings[headingIndex];
+        lines.splice(
+          heading.startLineIndex,
+          heading.lineIndex - heading.startLineIndex + 1,
+          heading.text,
+        );
+        newMd = lines.join('\n');
+      } else {
+        newMd = changeHeadingLevels(currentMd, new Map([[headingIndex, level]]));
       }
-    }
-    if (matchIdx === -1) return;
-
-    // Apply the heading level change
-    const line = lines[matchIdx];
-    const bareText = line.replace(/^#{1,6}\s+/, '').replace(/^\*\*(.+)\*\*$/, '$1').trim();
-    if (level === null) {
-      // Remove heading — convert to plain text
-      lines[matchIdx] = bareText;
     } else {
-      lines[matchIdx] = '#'.repeat(level) + ' ' + bareText;
+      const lines = currentMd.split('\n');
+      const matchIdx = lines.findIndex(line => {
+        const stripped = line.replace(/^#{1,9}\s+/, '').replace(/^\*\*(.+)\*\*$/, '$1').trim();
+        return stripped === selectedText || line.trim() === selectedText;
+      });
+      if (matchIdx < 0) return;
+      const bareText = lines[matchIdx].replace(/^#{1,9}\s+/, '').replace(/^\*\*(.+)\*\*$/, '$1').trim();
+      const replacement = level === null ? [bareText] : serializeHeading(level, bareText).split('\n');
+      lines.splice(matchIdx, 1, ...replacement);
+      newMd = lines.join('\n');
     }
 
-    const newMd = lines.join('\n');
+    if (newMd === null) return;
     setCleanedOverride(newMd);
     setHeadingEditMode(true);
     setCleanStats(null);
@@ -612,7 +637,7 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
         const changes = new Map<number, number>();
         for (const idx of selectedHeadings) {
           const h = outline[idx];
-          if (h && h.level < 6) changes.set(h.index, h.level + 1);
+          if (h && h.level < MAX_HEADING_LEVEL) changes.set(h.index, h.level + 1);
         }
         if (changes.size > 0) {
           const newMd = changeHeadingLevels(cleanedOverride ?? baseMd, changes);
@@ -764,7 +789,7 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
   // Quality stats (memoized)
   const stats = useMemo(() => ({
     pageMarkers: (md.match(/<!-- page: .+? -->/g) || []).length,
-    headings: (md.match(/^#{1,6}\s+\S/gm) || []).length,
+    headings: countHeadings(md),
     tables: (md.match(/^\|.+\|$/gm) || []).length,
     footnotes: (md.match(/\[\^\w+\]/g) || []).length,
   }), [md]);
@@ -1144,7 +1169,7 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
                           onClick={(e) => { e.stopPropagation(); handleDemote(h.index); }}
                           className="p-0.5 rounded text-p-text-dim hover:text-p-accent hover:bg-p-surface-hover tab-transition"
                           title="Demote (increase heading level)"
-                          disabled={h.level >= 6}
+                          disabled={h.level >= MAX_HEADING_LEVEL}
                         >
                           <ChevronRight className="w-3.5 h-3.5" />
                         </button>
@@ -1226,7 +1251,7 @@ export default function Preview({ job, markdown: externalMd, fileName: externalN
           <div className="px-3 py-1.5 text-[10px] text-p-text-dim border-b border-p-border-subtle truncate max-w-[220px]">
             {ctxMenu.text}
           </div>
-          {[1, 2, 3, 4, 5, 6].map(level => (
+          {Array.from({ length: MAX_HEADING_LEVEL }, (_, i) => i + 1).map(level => (
             <button
               key={level}
               onClick={() => applyHeadingFromContextMenu(level)}

@@ -15,8 +15,10 @@ const {
   reconcilePerChapterEndnotes, mergeEndnoteContinuations, extractEndnotePages,
   stripPrintedNotesSection, applyEndnoteFormatting, SECTION_BREAK_MARKER,
 } = require('./endnotes.cjs');
+const { HEADING_LEVEL_META_RE, matchHeadingAt, normalizeExtendedHeadingSyntax } = require('./headings.cjs');
 
 async function convertMarkdownToDocxLogos(markdown) {
+  markdown = normalizeExtendedHeadingSyntax(markdown);
   const docx = await import('docx');
   const {
     Document, Packer, Paragraph, TextRun, HeadingLevel,
@@ -241,28 +243,29 @@ async function convertMarkdownToDocxLogos(markdown) {
     }
 
     // ── Other HTML comments (skip) ─────────────────────────────────────
-    if (/^<!--.*-->$/.test(trimmed)) { i++; continue; }
+    if (/^<!--.*-->$/.test(trimmed) && !HEADING_LEVEL_META_RE.test(trimmed)) { i++; continue; }
 
     // ── Headings with Logos field tags ──────────────────────────────────
-    const headingMatch = trimmed.match(/^(#{1,8})\s+(.+)$/);
+    const headingMatch = matchHeadingAt(lines, i);
     if (headingMatch) {
-      const level = headingMatch[1].length;
+      const level = headingMatch.level;
       const levels = {
         1: HeadingLevel.HEADING_1, 2: HeadingLevel.HEADING_2,
         3: HeadingLevel.HEADING_3, 4: HeadingLevel.HEADING_4,
         5: HeadingLevel.HEADING_5, 6: HeadingLevel.HEADING_6,
       };
-
-      children.push(new Paragraph({
+      const paragraphOptions = {
         children: [
           new TextRun({ text: '{{field-on:Heading}}', size: 2, color: 'FFFFFF' }),
-          ...makeRuns(headingMatch[2], fnKeyToIndex, docx, usedFootnoteIds, NoteRefRun),
+          ...makeRuns(headingMatch.text, fnKeyToIndex, docx, usedFootnoteIds, NoteRefRun),
           new TextRun({ text: '{{field-off:Heading}}', size: 2, color: 'FFFFFF' }),
         ],
-        heading: levels[level] || HeadingLevel.HEADING_6,
         spacing: { before: 240, after: 120 },
-      }));
-      i++;
+      };
+      if (level <= 6) paragraphOptions.heading = levels[level];
+      else paragraphOptions.style = `Heading${level}`;
+      children.push(new Paragraph(paragraphOptions));
+      i = headingMatch.lineIndex + 1;
       continue;
     }
 
@@ -352,7 +355,7 @@ async function convertMarkdownToDocxLogos(markdown) {
   // ── Build and pack ───────────────────────────────────────────────────────
   // Explicitly define heading styles with outlineLevel so Logos/Verbum
   // recognizes them for table of contents generation.
-  const headingStyles = [1, 2, 3, 4, 5, 6].map(level => ({
+  const headingStyles = [1, 2, 3, 4, 5, 6, 7, 8, 9].map(level => ({
     id: `Heading${level}`,
     name: `Heading ${level}`,
     basedOn: 'Normal',
@@ -478,7 +481,7 @@ async function deduplicateHeadingStyles(buffer) {
 
   // Remove duplicate heading style blocks that lack outlineLvl.
   // Keep only the ones that contain <w:outlineLvl>.
-  const styleRegex = /<w:style\b[^>]*w:styleId="(Heading[1-6]|Title)"[^>]*>[\s\S]*?<\/w:style>/g;
+  const styleRegex = /<w:style\b[^>]*w:styleId="(Heading[1-9]|Title)"[^>]*>[\s\S]*?<\/w:style>/g;
   const seen = new Map(); // styleId → { xml, hasOutline, index }
   const matches = [];
   let m;

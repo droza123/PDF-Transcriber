@@ -1,3 +1,11 @@
+import {
+  collectHeadings,
+  EXTENDED_ATX_HEADING_RE,
+  MAX_HEADING_LEVEL,
+  normalizeExtendedHeadingSyntax,
+  serializeHeading,
+} from './headings';
+
 /**
  * Post-processing pass over joined batch markdown to clean up heading-level
  * issues that originate in per-batch AI transcription:
@@ -14,12 +22,9 @@
  * the same style as stripCodeFences / normalizeBlankLines in convert.ts.
  */
 
-/** Matches a markdown heading line; capped at H6 to match DOCX export limits.
- *  Also strips trailing `#` characters (ATX closing syntax). This is the
- *  canonical heading regex — Preview.tsx's outline builder and the
- *  `changeHeadingLevels` function both use `forEachHeading` which delegates
- *  here, guaranteeing index alignment. */
-export const HEADING_LINE_RE = /^(#{1,6})\s+(.+?)\s*#*\s*$/;
+/** Native/raw heading-line matcher. Logical metadata+H6 pairs are parsed by
+ * `collectHeadings`, which is the canonical iterator used by the UI. */
+export const HEADING_LINE_RE = EXTENDED_ATX_HEADING_RE;
 
 /** @deprecated Internal alias kept so the existing cleanup functions compile
  *  without a rename sweep. Points to the same regex as HEADING_LINE_RE. */
@@ -40,7 +45,7 @@ const DUP_WINDOW_LINES = 60;
  * started with one).
  */
 export function cleanMarkdownArtifacts(markdown: string): string {
-  return markdown.replace(/^(#{1,6})\s+#{1,6}\s+(.+)$/gm, '$1 $2');
+  return markdown.replace(/^(#{1,9})\s+#{1,9}\s+(.+)$/gm, '$1 $2');
 }
 
 /**
@@ -58,29 +63,34 @@ export function cleanMarkdownArtifacts(markdown: string): string {
  */
 export function removeTocHeadings(markdown: string): string {
   const TOC_LABEL = /^(Contents|Table of Contents|Inhaltsverzeichnis|Índice|Indice|Table des matières|Sommaire|目次)\s*$/i;
-  // Trailing page number: requires at least one separator (space/dot/dash/ellipsis) before the digits.
   const TRAILING_PAGE_NUM = /[.\s\-\u2013\u2014\u2026]+\d+\s*$/;
   const PAGE_MARKER = /^\s*<!--\s*page:\s*\S+\s*-->/i;
 
   const lines = markdown.split('\n');
+  const headingsByStart = new Map(collectHeadings(markdown).map(h => [h.startLineIndex, h]));
   const out: string[] = [];
   let inToc = false;
   let tocLevel = 0;
 
-  for (const line of lines) {
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const heading = headingsByStart.get(i);
+    const keepHeading = () => {
+      if (!heading) return;
+      out.push(...lines.slice(heading.startLineIndex, heading.lineIndex + 1));
+      i = heading.lineIndex;
+    };
+
     if (!inToc) {
-      const m = line.match(HEADING_RE);
-      if (m && TOC_LABEL.test(m[2].trim())) {
-        // Drop the "Contents" heading itself and enter TOC mode.
+      if (heading && TOC_LABEL.test(heading.text.trim())) {
         inToc = true;
-        tocLevel = m[1].length;
+        tocLevel = heading.level;
+        i = heading.lineIndex;
         continue;
       }
-      out.push(line);
+      if (heading) keepHeading(); else out.push(line);
       continue;
     }
-
-    // --- In TOC mode ---
 
     if (PAGE_MARKER.test(line)) {
       inToc = false;
@@ -88,32 +98,23 @@ export function removeTocHeadings(markdown: string): string {
       continue;
     }
 
-    const m = line.match(HEADING_RE);
-    if (m) {
-      const level = m[1].length;
-      const text = m[2].trim();
-
+    if (heading) {
+      const level = heading.level;
+      const headingText = heading.text.trim();
       if (level <= tocLevel) {
-        // Back to the same or higher level as the TOC header → real body starts.
         inToc = false;
-        out.push(line);
+        keepHeading();
         continue;
       }
-
-      if (TRAILING_PAGE_NUM.test(text)) {
-        // TOC-style entry: drop it.
+      if (TRAILING_PAGE_NUM.test(headingText)) {
+        i = heading.lineIndex;
         continue;
       }
-
-      // Heading deeper than TOC but with no trailing page number — assume body, exit.
       inToc = false;
-      out.push(line);
+      keepHeading();
       continue;
     }
 
-    // Non-heading line inside TOC: keep (typically the plain-text TOC
-    // entries the prompt asks for, or whitespace). They aren't a quality
-    // problem — we're only stripping heading-shaped TOC entries.
     out.push(line);
   }
 
@@ -136,19 +137,15 @@ export function removeTocHeadings(markdown: string): string {
  */
 export function removeDuplicateHeadings(markdown: string): string {
   const lines = markdown.split('\n');
-
   interface Seen { lineIdx: number; level: number; text: string; parent: string; }
   const seen: Seen[] = [];
   const drop = new Set<number>();
+  const headings = collectHeadings(markdown);
 
-  for (let i = 0; i < lines.length; i++) {
-    const m = lines[i].match(HEADING_RE);
-    if (!m) continue;
-
-    const level = m[1].length;
-    const text = m[2].trim();
-
-    // Resolve the nearest preceding KEPT heading with a smaller level — that's the parent.
+  for (const heading of headings) {
+    const i = heading.startLineIndex;
+    const level = heading.level;
+    const headingText = heading.text.trim();
     let parent = '';
     for (let j = seen.length - 1; j >= 0; j--) {
       if (drop.has(seen[j].lineIdx)) continue;
@@ -158,28 +155,30 @@ export function removeDuplicateHeadings(markdown: string): string {
       }
     }
 
-    // Look back through prior headings within the window for a same-key match
-    // under the same parent — that's a duplicate we should drop.
     let duplicate = false;
     for (let j = seen.length - 1; j >= 0; j--) {
       const prev = seen[j];
-      if (i - prev.lineIdx > DUP_WINDOW_LINES) break; // out of window; headings are ordered
+      if (i - prev.lineIdx > DUP_WINDOW_LINES) break;
       if (drop.has(prev.lineIdx)) continue;
-      if (prev.level === level && prev.text === text && prev.parent === parent) {
+      if (prev.level === level && prev.text === headingText && prev.parent === parent) {
         duplicate = true;
         break;
       }
     }
 
-    if (duplicate) {
-      drop.add(i);
-    } else {
-      seen.push({ lineIdx: i, level, text, parent });
-    }
+    if (duplicate) drop.add(i);
+    else seen.push({ lineIdx: i, level, text: headingText, parent });
   }
 
   if (drop.size === 0) return markdown;
-  return lines.filter((_, i) => !drop.has(i)).join('\n');
+  const headingsByStart = new Map(headings.map(h => [h.startLineIndex, h]));
+  const removeLines = new Set<number>();
+  for (const start of drop) {
+    const heading = headingsByStart.get(start);
+    if (!heading) continue;
+    for (let i = heading.startLineIndex; i <= heading.lineIndex; i++) removeLines.add(i);
+  }
+  return lines.filter((_, i) => !removeLines.has(i)).join('\n');
 }
 
 /**
@@ -201,36 +200,30 @@ export function removeDuplicateHeadings(markdown: string): string {
 export function flattenOutlineHeadings(markdown: string): string {
   const OUTLINE_START = /^<!--\s*Document Outline\s*-->\s*$/i;
   const OUTLINE_END = /^(---|\*\*\*|<!--\s*page:)/i;
-
   const lines = markdown.split('\n');
+  const headingsByStart = new Map(collectHeadings(markdown).map(h => [h.startLineIndex, h]));
   const out: string[] = [];
   let inOutline = false;
 
-  for (const line of lines) {
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
     const trimmed = line.trim();
     if (!inOutline) {
-      if (OUTLINE_START.test(trimmed)) {
-        inOutline = true;
-        out.push(line);
-        continue;
-      }
+      if (OUTLINE_START.test(trimmed)) inOutline = true;
       out.push(line);
       continue;
     }
-
-    // --- Inside the outline block ---
-
     if (OUTLINE_END.test(trimmed)) {
       inOutline = false;
       out.push(line);
       continue;
     }
 
-    const m = line.match(HEADING_RE);
-    if (m) {
-      const level = m[1].length;
-      const indent = '  '.repeat(Math.max(0, level - 1));
-      out.push(`${indent}- ${m[2]}`);
+    const heading = headingsByStart.get(i);
+    if (heading) {
+      const indent = '  '.repeat(Math.max(0, heading.level - 1));
+      out.push(`${indent}- ${heading.text}`);
+      i = heading.lineIndex;
       continue;
     }
     out.push(line);
@@ -256,18 +249,9 @@ export type HeadingVisitor = (
  *  the indices are consistent with the outline sidebar and
  *  `changeHeadingLevels`. */
 export function forEachHeading(body: string, visitor: HeadingVisitor): void {
-  const lines = body.split('\n');
-  let inFence = false;
-  let hi = 0;
-  for (let li = 0; li < lines.length; li++) {
-    if (/^```/.test(lines[li].trim())) { inFence = !inFence; continue; }
-    if (inFence) continue;
-    const m = lines[li].match(HEADING_LINE_RE);
-    if (m) {
-      visitor(hi, m[1], m[2], li);
-      hi++;
-    }
-  }
+  collectHeadings(body).forEach((heading, index) => {
+    visitor(index, '#'.repeat(heading.level), heading.text, heading.lineIndex);
+  });
 }
 
 // ── Heading-level rewriting ─────────────────────────────────────────────────
@@ -275,7 +259,7 @@ export function forEachHeading(body: string, visitor: HeadingVisitor): void {
 /**
  * Change heading levels for specific headings identified by their document-order
  * index. Takes the FULL markdown string (with frontmatter) and a Map of
- * `headingIndex → newLevel` (1–6). Returns the modified full markdown.
+ * `headingIndex → newLevel` (1–9). Returns the modified full markdown.
  *
  * All changes are applied in a single pass so multi-select promote/demote is
  * O(n) in document lines, not O(n × changes).
@@ -286,30 +270,37 @@ export function changeHeadingLevels(
 ): string {
   if (changes.size === 0) return fullMarkdown;
 
-  // Split frontmatter from body (same logic as Preview.tsx)
   const fmMatch = fullMarkdown.match(/^---\n([\s\S]*?)\n---\n?/);
   const fmPrefix = fmMatch ? fmMatch[0] : '';
-  const body = fmMatch ? fullMarkdown.slice(fmMatch[0].length) : fullMarkdown;
-
+  const body = normalizeExtendedHeadingSyntax(
+    fmMatch ? fullMarkdown.slice(fmMatch[0].length) : fullMarkdown,
+  );
   const lines = body.split('\n');
-  let inFence = false;
-  let hi = 0;
+  const headings = collectHeadings(body);
+  const replacements = new Map<number, { end: number; text: string }>();
 
-  for (let li = 0; li < lines.length; li++) {
-    if (/^```/.test(lines[li].trim())) { inFence = !inFence; continue; }
-    if (inFence) continue;
-    const m = lines[li].match(HEADING_LINE_RE);
-    if (m) {
-      const newLevel = changes.get(hi);
-      if (newLevel !== undefined) {
-        const clamped = Math.max(1, Math.min(6, newLevel));
-        lines[li] = '#'.repeat(clamped) + ' ' + m[2];
-      }
-      hi++;
+  headings.forEach((heading, index) => {
+    const newLevel = changes.get(index);
+    if (newLevel === undefined) return;
+    const clamped = Math.max(1, Math.min(MAX_HEADING_LEVEL, Math.trunc(newLevel)));
+    replacements.set(heading.startLineIndex, {
+      end: heading.lineIndex,
+      text: serializeHeading(clamped, heading.text),
+    });
+  });
+
+  const out: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const replacement = replacements.get(i);
+    if (!replacement) {
+      out.push(lines[i]);
+      continue;
     }
+    out.push(...replacement.text.split('\n'));
+    i = replacement.end;
   }
 
-  return fmPrefix + lines.join('\n');
+  return fmPrefix + out.join('\n');
 }
 
 /**
@@ -321,7 +312,7 @@ export function changeHeadingLevels(
  *   4. Duplicate heading removal last.
  */
 export function cleanHeadings(markdown: string): string {
-  let out = markdown;
+  let out = normalizeExtendedHeadingSyntax(markdown);
   out = flattenOutlineHeadings(out);
   out = cleanMarkdownArtifacts(out);
   out = removeTocHeadings(out);
