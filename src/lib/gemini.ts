@@ -4,7 +4,7 @@
  * orchestration is in providers/orchestrator.ts.
  */
 import { callWithRetry, callTextWithRetry, type OrchestratorCallOptions } from './providers/orchestrator';
-import type { Provider, ProviderResult } from './providers/types';
+import type { PromptParts, Provider, ProviderResult } from './providers/types';
 import { getSettings } from './settings';
 import { getTranscribeProvider } from './providers/registry';
 import { collectHeadings, serializeHeading } from './headings';
@@ -70,12 +70,18 @@ export function parseNoteStyle(outline: string): NoteStyle {
   return (m ? m[1].toLowerCase() : 'unknown') as NoteStyle;
 }
 
-function buildBatchPrompt(
+/**
+ * Build the batch prompt. `prompt` is the full text every provider receives.
+ * `parts` holds the same instructions split so that `stable` (identical for
+ * every batch of one document) can come first: providers with prompt caching
+ * send `stable`, then the PDF, then `volatile`.
+ */
+export function buildBatchPromptParts(
   batchNum: number,
   totalBatches: number,
   outline: string,
   previousBatchHeadings: string = '',
-): string {
+): { prompt: string; parts: PromptParts } {
   const settings = getSettings();
   const extra = settings.outputNotes ? `\n\nCustom instructions:\n${settings.outputNotes}` : '';
 
@@ -101,12 +107,12 @@ ${previousBatchHeadings}
 DO NOT repeat these headings. If the current batch begins mid-section (i.e., the first pages continue content under one of the headings above), do NOT re-emit that section's title — continue the content directly. Only emit a heading when you cross into a NEW section not listed above.`
     : '';
 
-  return `Convert this PDF to Markdown optimized for AI-assisted academic citation.
-This is batch ${batchNum} of ${totalBatches} from the source document.
+  const intro = 'Convert this PDF to Markdown optimized for AI-assisted academic citation.';
+  const batchLine = `This is batch ${batchNum} of ${totalBatches} from the source document.`;
+  const outlineBlock = `Here is the document's structural outline for context (use this to determine correct heading levels and understand where this batch falls in the document):
 
-Here is the document's structural outline for context (use this to determine correct heading levels and understand where this batch falls in the document):
-
-${outline}${prevBlock}
+${outline}`;
+  const rules = `
 
 Page numbering:
 - Look for printed page numbers on each page of this PDF.
@@ -141,6 +147,14 @@ ${noteRules}
 11. Preserve numbered and bulleted lists exactly.
 12. Do not add commentary — output only document content as Markdown.
 13. Never duplicate content — each passage of text should appear exactly once.${extra}`;
+
+  return {
+    prompt: `${intro}\n${batchLine}\n\n${outlineBlock}${prevBlock}${rules}`,
+    parts: {
+      stable: `${intro}\n\n${outlineBlock}${rules}`,
+      volatile: `${batchLine}${prevBlock}`,
+    },
+  };
 }
 
 /**
@@ -192,9 +206,9 @@ export async function convertPdfBatchToMarkdown(
   provider?: Provider,
   models?: string[],
 ): Promise<ProviderResult> {
-  const prompt = buildBatchPrompt(batchNum, totalBatches, outline, previousBatchHeadings);
+  const { prompt, parts } = buildBatchPromptParts(batchNum, totalBatches, outline, previousBatchHeadings);
   return callWithRetry(pdfBlob, prompt, {
-    provider, models, onRetry, abortSignal, skipModels, onModelSkip, onModelStart, onStreamProgress, onError,
+    promptParts: parts, provider, models, onRetry, abortSignal, skipModels, onModelSkip, onModelStart, onStreamProgress, onError,
   });
 }
 

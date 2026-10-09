@@ -22,9 +22,13 @@ export const DEFAULT_GEMINI_MODELS = [
 ];
 
 export const DEFAULT_ANTHROPIC_MODELS = [
-  'claude-sonnet-4-20250514',
-  'claude-haiku-35-20241022',
+  'claude-opus-5-5',
+  'claude-sonnet-5-5',
 ];
+
+/** Earlier Anthropic defaults; 'claude-haiku-35-20241022' was never a valid ID. */
+const OLD_DEFAULT_ANTHROPIC_MODEL = 'claude-sonnet-4-20250514';
+const INVALID_ANTHROPIC_MODEL = 'claude-haiku-35-20241022';
 
 export const DEFAULT_OPENROUTER_MODELS: string[] = [];
 
@@ -253,6 +257,24 @@ export function getSettings(): AppSettings {
       parsed.scanProvider = parsed.activeProvider;
       parsed.transcribeProvider = parsed.activeProvider;
       parsed.translateProvider = parsed.activeProvider;
+    }
+
+    // Migration: drop the invalid Haiku ID, and replace the untouched old
+    // Anthropic defaults with the current ones. Custom lists are kept.
+    const anthropicList: string[] | undefined = parsed.providerModelPriority?.anthropic;
+    if (anthropicList?.includes(INVALID_ANTHROPIC_MODEL)) {
+      const kept = anthropicList.filter(m => m !== INVALID_ANTHROPIC_MODEL);
+      parsed.providerModelPriority.anthropic =
+        kept.length === 0 || (kept.length === 1 && kept[0] === OLD_DEFAULT_ANTHROPIC_MODEL)
+          ? [...DEFAULT_ANTHROPIC_MODELS]
+          : kept;
+    }
+    for (const stage of Object.keys(parsed.stageModelPriority ?? {})) {
+      const override: string[] | undefined = parsed.stageModelPriority[stage]?.anthropic;
+      if (!override?.includes(INVALID_ANTHROPIC_MODEL)) continue;
+      const kept = override.filter(m => m !== INVALID_ANTHROPIC_MODEL);
+      if (kept.length > 0) parsed.stageModelPriority[stage].anthropic = kept;
+      else delete parsed.stageModelPriority[stage].anthropic;
     }
 
     // Migration: add English and trim translation languages to new defaults

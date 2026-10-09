@@ -1,10 +1,21 @@
 /** Identifies a supported API provider. */
 export type ProviderId = 'gemini' | 'openrouter' | 'anthropic' | 'openai' | 'mistral' | 'custom';
 
+/**
+ * The same instructions as `prompt`, split for prompt caching: `stable` is
+ * identical across every call of one job, `volatile` changes per call.
+ */
+export interface PromptParts {
+  stable: string;
+  volatile: string;
+}
+
 /** Options passed to a single API attempt (no retry logic). */
 export interface ProviderCallOptions {
   model: string;
   prompt: string;
+  /** Optional cache-friendly split of `prompt`; providers without caching ignore it. */
+  promptParts?: PromptParts;
   maxOutputTokens: number;
   abortSignal?: AbortSignal;
   onStreamProgress?: (phase: 'uploading' | 'processing' | 'streaming', charsReceived: number) => void;

@@ -1,4 +1,5 @@
 import type { Provider, ProviderCallOptions, ProviderModel, ProviderResult } from './types';
+import { getSecret } from '../secretStore';
 
 const API_BASE = 'https://api.openai.com/v1';
 
@@ -243,7 +244,7 @@ export class OpenAIProvider implements Provider {
   }
 
   private _getKey(): string {
-    const key = localStorage.getItem('provider_api_key_openai') || null;
+    const key = getSecret('provider_api_key_openai') || null;
     if (!key) throw new Error('OpenAI API key is required. Configure it in the settings above.');
     return key;
   }

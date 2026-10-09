@@ -1,4 +1,5 @@
 import type { Provider, ProviderCallOptions, ProviderModel, ProviderResult } from './types';
+import { getSecret } from '../secretStore';
 import { pdfToImages } from '../pdfImages';
 
 const API_BASE = 'https://api.mistral.ai/v1';
@@ -163,7 +164,7 @@ export class MistralProvider implements Provider {
   }
 
   private _getKey(): string {
-    const key = localStorage.getItem('provider_api_key_mistral') || null;
+    const key = getSecret('provider_api_key_mistral') || null;
     if (!key) throw new Error('Mistral API key is required. Configure it in the settings above.');
     return key;
   }
