@@ -1,5 +1,6 @@
 import { GoogleGenAI } from '@google/genai';
 import type { Provider, ProviderCallOptions, ProviderModel, ProviderResult } from './types';
+import { getSecret } from '../secretStore';
 
 const MAX_OUTPUT_TOKENS = 65536;
 
@@ -184,9 +185,8 @@ export class GeminiProvider implements Provider {
   }
 
   private _getKey(): string {
-    // Import dynamically to avoid circular deps — key storage is in apiKey.ts
-    const key = localStorage.getItem('provider_api_key_gemini')
-      || localStorage.getItem('gemini_api_key')  // migration fallback
+    const key = getSecret('provider_api_key_gemini')
+      || getSecret('gemini_api_key')  // migration fallback
       || null;
     if (!key) throw new Error('Gemini API key is required. Configure it in the settings above.');
     return key;

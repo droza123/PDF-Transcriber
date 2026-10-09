@@ -1,4 +1,4 @@
-const { app, BrowserWindow, shell, session, ipcMain, powerSaveBlocker, dialog } = require('electron');
+const { app, BrowserWindow, shell, session, ipcMain, powerSaveBlocker, dialog, safeStorage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { Worker } = require('worker_threads');
@@ -29,6 +29,7 @@ const queuePath = path.join(userDataPath, 'queue.json');
 const progressDir = path.join(userDataPath, 'progress');
 const markdownDir = path.join(userDataPath, 'markdown');
 const logPath = path.join(userDataPath, 'log.json');
+const secretsPath = path.join(userDataPath, 'secrets.json');
 
 fs.mkdirSync(progressDir, { recursive: true });
 fs.mkdirSync(markdownDir, { recursive: true });
@@ -180,6 +181,58 @@ ipcMain.handle('load-internal-markdown', async (_event, jobId) => {
   } catch {
     return null;
   }
+});
+
+// ── IPC: secrets (API keys, encrypted with the OS keychain) ─────────────────
+//
+// secrets.json maps a name to base64 of safeStorage.encryptString(value).
+// safeStorage uses DPAPI on Windows and the Keychain on macOS. On Linux it can
+// fall back to a hard-coded password ("basic_text"), which is no better than
+// plain text, so we report encryption as unavailable there and the renderer
+// keeps using localStorage.
+
+function secretsEncryptionAvailable() {
+  if (!safeStorage.isEncryptionAvailable()) return false;
+  if (process.platform === 'linux' && safeStorage.getSelectedStorageBackend() === 'basic_text') return false;
+  return true;
+}
+
+// Serialize read-modify-write cycles so concurrent saves can't drop each other.
+let secretsWriteChain = Promise.resolve();
+function updateSecrets(mutate) {
+  const run = secretsWriteChain.then(async () => {
+    const stored = await readJson(secretsPath, {});
+    mutate(stored);
+    await atomicWriteJson(secretsPath, stored);
+  });
+  secretsWriteChain = run.catch(() => {});
+  return run;
+}
+
+ipcMain.handle('secrets:available', () => secretsEncryptionAvailable());
+
+ipcMain.handle('secrets:load-all', async () => {
+  if (!secretsEncryptionAvailable()) return {};
+  const stored = await readJson(secretsPath, {});
+  const result = {};
+  for (const [name, encrypted] of Object.entries(stored)) {
+    try {
+      result[name] = safeStorage.decryptString(Buffer.from(encrypted, 'base64'));
+    } catch (e) {
+      console.error(`[secrets] Could not decrypt ${name}:`, e.message);
+    }
+  }
+  return result;
+});
+
+ipcMain.handle('secrets:set', async (_event, name, value) => {
+  if (!secretsEncryptionAvailable()) throw new Error('Secure storage is not available');
+  const encrypted = safeStorage.encryptString(value).toString('base64');
+  await updateSecrets(stored => { stored[name] = encrypted; });
+});
+
+ipcMain.handle('secrets:delete', async (_event, name) => {
+  await updateSecrets(stored => { delete stored[name]; });
 });
 
 // ── IPC: persistence ─────────────────────────────────────────────────────────

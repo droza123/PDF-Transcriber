@@ -30,6 +30,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   readPdf: (pdfPath) => ipcRenderer.invoke('persistence:read-pdf', pdfPath),
   fileExists: (filePath) => ipcRenderer.invoke('persistence:file-exists', filePath),
 
+  // Secrets (API keys), encrypted by the main process with the OS keychain
+  secrets: {
+    available: () => ipcRenderer.invoke('secrets:available'),
+    loadAll: () => ipcRenderer.invoke('secrets:load-all'),
+    set: (name, value) => ipcRenderer.invoke('secrets:set', name, value),
+    delete: (name) => ipcRenderer.invoke('secrets:delete', name),
+  },
+
   // DOCX conversion (runs in worker thread with native footnotes)
   // format: 'standard' (default) or 'logos' (Logos/Verbum Personal Books)
   convertMarkdownToDocx: (markdown, format) => ipcRenderer.invoke('convert-markdown-to-docx', markdown, format),

@@ -49,6 +49,12 @@ declare global {
     }) => Promise<string | null>;
     readPdf: (pdfPath: string) => Promise<ArrayBuffer>;
     fileExists: (filePath: string) => Promise<boolean>;
+    secrets: {
+      available: () => Promise<boolean>;
+      loadAll: () => Promise<Record<string, string>>;
+      set: (name: string, value: string) => Promise<void>;
+      delete: (name: string) => Promise<void>;
+    };
     convertMarkdownToDocx: (markdown: string, format?: string) => Promise<ArrayBuffer>;
     startPowerBlock: (preventSleep?: boolean) => Promise<number>;
     stopPowerBlock: () => Promise<void>;

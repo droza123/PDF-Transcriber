@@ -1,5 +1,6 @@
 import type { ProviderId } from './providers/types';
 import { getSettings } from './settings';
+import { getSecret, setSecret, removeSecret } from './secretStore';
 
 function storageKey(provider: ProviderId): string {
   return `provider_api_key_${provider}`;
@@ -10,23 +11,23 @@ export function getApiKey(provider?: ProviderId): string | null {
 
   // Migration: move old gemini_api_key to new format on first access
   if (p === 'gemini') {
-    const oldKey = localStorage.getItem('gemini_api_key');
+    const oldKey = getSecret('gemini_api_key');
     if (oldKey) {
-      localStorage.setItem(storageKey('gemini'), oldKey);
-      localStorage.removeItem('gemini_api_key');
+      setSecret(storageKey('gemini'), oldKey);
+      removeSecret('gemini_api_key');
       return oldKey;
     }
   }
 
-  return localStorage.getItem(storageKey(p)) || null;
+  return getSecret(storageKey(p)) || null;
 }
 
 export function setApiKey(provider: ProviderId, key: string): void {
-  localStorage.setItem(storageKey(provider), key);
+  setSecret(storageKey(provider), key);
 }
 
 export function clearApiKey(provider: ProviderId): void {
-  localStorage.removeItem(storageKey(provider));
+  removeSecret(storageKey(provider));
 }
 
 export function hasApiKey(provider?: ProviderId): boolean {
@@ -43,25 +44,20 @@ export function hasApiKey(provider?: ProviderId): boolean {
 
 // ── Custom config-specific API key helpers ──
 
+function customConfigStorageKey(configId: string): string {
+  return configId === 'manual' ? 'provider_api_key_custom' : `provider_api_key_custom_${configId}`;
+}
+
 export function getCustomConfigApiKey(configId: string): string | null {
-  if (configId === 'manual') return localStorage.getItem('provider_api_key_custom') || null;
-  return localStorage.getItem(`provider_api_key_custom_${configId}`) || null;
+  return getSecret(customConfigStorageKey(configId)) || null;
 }
 
 export function setCustomConfigApiKey(configId: string, key: string): void {
-  if (configId === 'manual') {
-    localStorage.setItem('provider_api_key_custom', key);
-  } else {
-    localStorage.setItem(`provider_api_key_custom_${configId}`, key);
-  }
+  setSecret(customConfigStorageKey(configId), key);
 }
 
 export function clearCustomConfigApiKey(configId: string): void {
-  if (configId === 'manual') {
-    localStorage.removeItem('provider_api_key_custom');
-  } else {
-    localStorage.removeItem(`provider_api_key_custom_${configId}`);
-  }
+  removeSecret(customConfigStorageKey(configId));
 }
 
 /** Get cached available models for a provider. */

@@ -67,7 +67,7 @@ Use **Gemini to Scan** and **Mistral's OCR model to Transcribe**. Mistral's OCR 
 | **OpenAI** | Paid | Vision models via the standard API. |
 | **Custom** | Varies | Any OpenAI-compatible endpoint. |
 
-> You bring your own API key for whichever provider(s) you choose. Keys are stored locally on your machine.
+> You bring your own API key for whichever provider(s) you choose. Keys are stored locally on your machine, encrypted with your operating system's keychain (Windows DPAPI / macOS Keychain).
 
 ---
 
@@ -119,7 +119,7 @@ Every transcription can be exported to several formats from the in-app preview:
 
 ## Privacy
 
-PDF Transcriber is a local desktop app. Your PDFs are sent only to the AI provider you configure (to do the transcription) and to nowhere else. API keys are stored on your machine. There is no PDF Transcriber account or cloud service.
+PDF Transcriber is a local desktop app. Your PDFs are sent only to the AI provider you configure (to do the transcription) and to nowhere else. API keys are stored on your machine, encrypted with your operating system's keychain. There is no PDF Transcriber account or cloud service.
 
 ---
 

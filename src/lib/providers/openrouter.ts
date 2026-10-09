@@ -1,4 +1,5 @@
 import type { Provider, ProviderCallOptions, ProviderModel, ProviderResult } from './types';
+import { getSecret } from '../secretStore';
 
 const API_BASE = 'https://openrouter.ai/api/v1';
 const MODELS_CACHE_KEY = 'openrouter_models_cache';
@@ -346,7 +347,7 @@ export class OpenRouterProvider implements Provider {
   }
 
   private _getKey(): string {
-    const key = localStorage.getItem('provider_api_key_openrouter') || null;
+    const key = getSecret('provider_api_key_openrouter') || null;
     if (!key) throw new Error('OpenRouter API key is required. Configure it in the settings above.');
     return key;
   }

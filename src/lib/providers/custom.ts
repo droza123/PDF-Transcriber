@@ -1,4 +1,5 @@
 import type { Provider, ProviderCallOptions, ProviderModel, ProviderResult } from './types';
+import { getSecret } from '../secretStore';
 import type { CustomPdfMode } from '../settings';
 import { getSettings, CUSTOM_PRESETS } from '../settings';
 import { pdfToImages } from '../pdfImages';
@@ -246,9 +247,9 @@ export class CustomProvider implements Provider {
   private _getKeyOptional(): string | null {
     const { customActiveConfigId } = getSettings();
     if (customActiveConfigId === 'manual') {
-      return localStorage.getItem('provider_api_key_custom') || null;
+      return getSecret('provider_api_key_custom') || null;
     }
-    return localStorage.getItem(`provider_api_key_custom_${customActiveConfigId}`) || null;
+    return getSecret(`provider_api_key_custom_${customActiveConfigId}`) || null;
   }
 
   /** Resolve the effective PDF input mode for the active custom config. */

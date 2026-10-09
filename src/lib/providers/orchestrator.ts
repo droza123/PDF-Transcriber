@@ -1,4 +1,4 @@
-import type { Provider, ProviderResult } from './types';
+import type { PromptParts, Provider, ProviderResult } from './types';
 import { getActiveProvider } from './registry';
 import { getActiveModelPriority } from '../settings';
 
@@ -14,6 +14,8 @@ export interface OrchestratorCallOptions {
   onError?: (model: string, reason: string, action: string) => void;
   abortSignal?: AbortSignal;
   skipModels?: Set<string>;
+  /** Cache-friendly split of the prompt, passed through to the provider. */
+  promptParts?: PromptParts;
 }
 
 export type { ProviderResult as OrchestratorResult };
@@ -29,7 +31,7 @@ export async function callWithRetry(
   prompt: string,
   options: OrchestratorCallOptions = {},
 ): Promise<ProviderResult> {
-  const { provider: explicitProvider, models: explicitModels, onRetry, onModelSkip, onModelStart, onStreamProgress, onError, abortSignal, skipModels } = options;
+  const { provider: explicitProvider, models: explicitModels, onRetry, onModelSkip, onModelStart, onStreamProgress, onError, abortSignal, skipModels, promptParts } = options;
   const provider: Provider = explicitProvider ?? getActiveProvider();
 
   const allModels = explicitModels ?? getActiveModelPriority();
@@ -58,6 +60,7 @@ export async function callWithRetry(
       const result = await provider.call(pdfBlob, {
         model,
         prompt,
+        promptParts,
         maxOutputTokens: MAX_OUTPUT_TOKENS,
         abortSignal,
         onStreamProgress,
@@ -140,6 +143,7 @@ export async function callWithRetry(
         const result = await provider.call(pdfBlob, {
           model,
           prompt,
+          promptParts,
           maxOutputTokens: MAX_OUTPUT_TOKENS,
           abortSignal,
           onStreamProgress,
@@ -267,7 +271,7 @@ export async function callTextWithRetry(
         return await provider.callText({
           model,
           prompt,
-          maxOutputTokens: MAX_OUTPUT_TOKENS,
+            maxOutputTokens: MAX_OUTPUT_TOKENS,
           abortSignal,
           onStreamProgress,
         });
