@@ -131,6 +131,11 @@ export interface AppSettings {
    * (OCR-mode transcriptions always run this stage regardless of the flag.)
    */
   headingCorrectionEnabled: boolean;
+  /**
+   * Hidden marker: the one-time switch of headingCorrectionEnabled to on
+   * (when it became the default in v1.48.1) has been applied.
+   */
+  headingCorrectionDefaultOnApplied: boolean;
   fileNaming: FileNaming;
   translationEnabled: boolean;
   translationLanguage: string;
@@ -172,7 +177,8 @@ const DEFAULTS: AppSettings = {
   autoExportFormats: ['md'],
   preventSleep: true,
   headingCleanupEnabled: true,
-  headingCorrectionEnabled: false,
+  headingCorrectionEnabled: true,
+  headingCorrectionDefaultOnApplied: true,
   fileNaming: 'overwrite',
   translationEnabled: false,
   translationLanguage: '',
@@ -275,6 +281,15 @@ export function getSettings(): AppSettings {
       const kept = override.filter(m => m !== INVALID_ANTHROPIC_MODEL);
       if (kept.length > 0) parsed.stageModelPriority[stage].anthropic = kept;
       else delete parsed.stageModelPriority[stage].anthropic;
+    }
+
+    // Migration: AI heading correction became the default in v1.48.1. Saved
+    // settings store the old default (false), so switch it on once. It was
+    // opt-in before, so a stored false almost always means "never touched";
+    // if the user turns it off again afterwards, that choice is kept.
+    if (!parsed.headingCorrectionDefaultOnApplied) {
+      parsed.headingCorrectionEnabled = true;
+      parsed.headingCorrectionDefaultOnApplied = true;
     }
 
     // Migration: add English and trim translation languages to new defaults

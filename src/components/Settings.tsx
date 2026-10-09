@@ -137,7 +137,7 @@ export default function Settings({ open, onClose, initialProvider }: SettingsPro
   const [fileNaming, setFileNaming] = useState<FileNaming>('overwrite');
   const [preventSleep, setPreventSleep] = useState(false);
   const [headingCleanupEnabled, setHeadingCleanupEnabled] = useState(true);
-  const [headingCorrectionEnabled, setHeadingCorrectionEnabled] = useState(false);
+  const [headingCorrectionEnabled, setHeadingCorrectionEnabled] = useState(true);
   const [translationEnabled, setTranslationEnabled] = useState(false);
   const [translationLanguage, setTranslationLanguage] = useState('');
   const [translationLanguages, setTranslationLanguages] = useState<string[]>([]);
